@@ -1,0 +1,16 @@
+version: "3.9"
+
+services:
+  build-and-test:
+    build:
+      context: .
+    image: minitrain/build
+    container_name: minitrain-build
+    volumes:
+      - .:/workspace
+    working_dir: /workspace
+    command: >-
+      bash -lc "cmake -S firmware -B firmware/build && \
+      cmake --build firmware/build && \
+      ctest --test-dir firmware/build && \
+      cd android-app && gradle --no-daemon test"
