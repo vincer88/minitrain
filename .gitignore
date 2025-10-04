@@ -1,0 +1,4 @@
+firmware/build/
+android-app/.gradle/
+android-app/app/build/
+.gradle/

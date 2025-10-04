@@ -1,0 +1,48 @@
+#include "minitrain/telemetry.hpp"
+
+#include <numeric>
+
+namespace minitrain {
+
+TelemetryAggregator::TelemetryAggregator(std::size_t windowSize) : windowSize_{windowSize} {
+    samples_.reserve(windowSize_);
+}
+
+void TelemetryAggregator::addSample(const TelemetrySample &sample) {
+    if (samples_.size() == windowSize_) {
+        samples_.erase(samples_.begin());
+    }
+    samples_.push_back(sample);
+}
+
+std::optional<TelemetrySample> TelemetryAggregator::average() const {
+    if (samples_.empty()) {
+        return std::nullopt;
+    }
+
+    TelemetrySample result{};
+    for (const auto &sample : samples_) {
+        result.speedMetersPerSecond += sample.speedMetersPerSecond;
+        result.motorCurrentAmps += sample.motorCurrentAmps;
+        result.batteryVoltage += sample.batteryVoltage;
+        result.temperatureCelsius += sample.temperatureCelsius;
+    }
+
+    const float size = static_cast<float>(samples_.size());
+    result.speedMetersPerSecond /= size;
+    result.motorCurrentAmps /= size;
+    result.batteryVoltage /= size;
+    result.temperatureCelsius /= size;
+
+    return result;
+}
+
+std::vector<TelemetrySample> TelemetryAggregator::history() const {
+    return samples_;
+}
+
+void TelemetryAggregator::clear() {
+    samples_.clear();
+}
+
+} // namespace minitrain
