@@ -30,3 +30,27 @@ gradle test
 ```
 
 Les tests valident l'ensemble des comportements critiques : PID, agrégateur de télémétrie, traitement des commandes, logique de ViewModel et interactions réseau simulées.
+
+## Exécution via Docker
+
+Un `Dockerfile` est fourni pour créer une image capable de construire et d'exécuter tous les tests sans installer les dépendances sur la machine hôte.
+
+### Construire l'image
+
+```bash
+docker build -t minitrain:latest .
+```
+
+### Lancer les tests dans un conteneur éphémère
+
+```bash
+docker run --rm minitrain:latest
+```
+
+### Utiliser docker-compose pour lancer la chaîne complète
+
+```bash
+docker compose up --build
+```
+
+La commande `docker compose` construit l'image à partir du `Dockerfile`, monte le code local et exécute la même séquence de tests que ci-dessus.
