@@ -92,7 +92,7 @@ int runCommandChannelTests() {
         ++failures;
     }
 
-    TelemetrySample sample{3.0F, 0.4F, 11.1F, 35.0F};
+    TelemetrySample sample{3.0F, 0.4F, 11.1F, 35.0F, true};
     channel.publishTelemetry(sample, 42);
     if (clientPtr->sent.empty()) {
         std::cerr << "Telemetry frame should have been sent" << std::endl;
@@ -103,9 +103,24 @@ int runCommandChannelTests() {
             std::cerr << "Telemetry header invalid" << std::endl;
             ++failures;
         }
-        if (frame.payload.size() != sizeof(float) * 4) {
+        if (frame.payload.size() != sizeof(float) * 5) {
             std::cerr << "Telemetry payload size mismatch" << std::endl;
             ++failures;
+        }
+        if (frame.payload.size() == sizeof(float) * 5) {
+            float failSafeFlag;
+            std::memcpy(&failSafeFlag, frame.payload.data() + 4 * sizeof(float), sizeof(float));
+#if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+            std::uint32_t bits;
+            std::memcpy(&bits, &failSafeFlag, sizeof(float));
+            bits = ((bits & 0x000000FFU) << 24U) | ((bits & 0x0000FF00U) << 8U) | ((bits & 0x00FF0000U) >> 8U) |
+                   ((bits & 0xFF000000U) >> 24U);
+            std::memcpy(&failSafeFlag, &bits, sizeof(float));
+#endif
+            if (failSafeFlag < 0.9F) {
+                std::cerr << "Fail-safe flag should be encoded as 1.0F" << std::endl;
+                ++failures;
+            }
         }
     }
 

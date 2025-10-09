@@ -12,6 +12,7 @@ struct TelemetrySample {
     float motorCurrentAmps{0.0F};
     float batteryVoltage{0.0F};
     float temperatureCelsius{0.0F};
+    bool failSafeActive{false};
 };
 
 class TelemetryAggregator {

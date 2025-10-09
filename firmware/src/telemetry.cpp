@@ -21,11 +21,13 @@ std::optional<TelemetrySample> TelemetryAggregator::average() const {
     }
 
     TelemetrySample result{};
+    bool anyFailSafe = false;
     for (const auto &sample : samples_) {
         result.speedMetersPerSecond += sample.speedMetersPerSecond;
         result.motorCurrentAmps += sample.motorCurrentAmps;
         result.batteryVoltage += sample.batteryVoltage;
         result.temperatureCelsius += sample.temperatureCelsius;
+        anyFailSafe = anyFailSafe || sample.failSafeActive;
     }
 
     const float size = static_cast<float>(samples_.size());
@@ -33,6 +35,7 @@ std::optional<TelemetrySample> TelemetryAggregator::average() const {
     result.motorCurrentAmps /= size;
     result.batteryVoltage /= size;
     result.temperatureCelsius /= size;
+    result.failSafeActive = anyFailSafe;
 
     return result;
 }

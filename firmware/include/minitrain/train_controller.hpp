@@ -10,12 +10,26 @@
 
 namespace minitrain {
 
+#ifndef MINITRAIN_FAILSAFE_THRESHOLD_MS
+#define MINITRAIN_FAILSAFE_THRESHOLD_MS 250
+#endif
+
+#ifndef MINITRAIN_FAILSAFE_RAMP_MS
+#define MINITRAIN_FAILSAFE_RAMP_MS 1000
+#endif
+
 class TrainController {
   public:
     using MotorCommandWriter = std::function<void(float)>;
     using TelemetryPublisher = std::function<void(const TelemetrySample &)>;
+    using Clock = std::function<std::chrono::steady_clock::time_point()>;
 
-    TrainController(PidController speedController, MotorCommandWriter motorWriter, TelemetryPublisher telemetryPublisher);
+    TrainController(PidController speedController, MotorCommandWriter motorWriter, TelemetryPublisher telemetryPublisher,
+                   std::chrono::steady_clock::duration staleCommandThreshold =
+                       std::chrono::milliseconds{MINITRAIN_FAILSAFE_THRESHOLD_MS},
+                   std::chrono::steady_clock::duration failSafeRampDuration =
+                       std::chrono::milliseconds{MINITRAIN_FAILSAFE_RAMP_MS},
+                   Clock clock = {});
 
     void setTargetSpeed(float metersPerSecond);
     void setDirection(Direction direction);
@@ -25,6 +39,7 @@ class TrainController {
 
     void onSpeedMeasurement(float measuredSpeed, std::chrono::steady_clock::duration dt);
     void onTelemetrySample(const TelemetrySample &sample);
+    void registerCommandTimestamp(std::chrono::steady_clock::time_point timestamp);
 
     [[nodiscard]] TrainState state() const;
     [[nodiscard]] std::optional<TelemetrySample> aggregatedTelemetry() const;
@@ -36,6 +51,9 @@ class TrainController {
     MotorCommandWriter motorWriter_;
     TelemetryPublisher telemetryPublisher_;
     TelemetryAggregator telemetryAggregator_;
+    std::chrono::steady_clock::duration staleCommandThreshold_;
+    std::chrono::steady_clock::duration failSafeRampDuration_;
+    Clock clock_;
 };
 
 } // namespace minitrain
