@@ -3,8 +3,9 @@ package com.minitrain.app.repository
 import com.minitrain.app.model.ControlState
 import com.minitrain.app.model.Telemetry
 import com.minitrain.app.model.TrainCommand
-import com.minitrain.app.network.CommandEncoder
-import com.minitrain.app.network.TelemetryParser
+import com.minitrain.app.network.CommandChannelClient
+import com.minitrain.app.network.CommandKind
+import com.minitrain.app.network.buildRealtimeHttpClient
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
@@ -15,37 +16,100 @@ import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import java.time.Clock
+import java.util.UUID
 
-open class TrainRepository(
+@Deprecated("Migrating to binary WebSocket channel")
+interface LegacyTrainTransport {
+    suspend fun sendCommand(command: TrainCommand)
+    suspend fun pushState(state: ControlState)
+    suspend fun fetchTelemetry(): Telemetry
+}
+
+@Deprecated("Migrating to binary WebSocket channel")
+open class HttpTrainTransport(
     private val baseUrl: String,
     private val client: HttpClient = HttpClient {
-        install(ContentNegotiation) {
-            json()
+        install(ContentNegotiation) { json() }
+    },
+    private val json: Json = Json { encodeDefaults = true; ignoreUnknownKeys = true }
+) : LegacyTrainTransport {
+    override suspend fun sendCommand(command: TrainCommand) {
+        withContext(Dispatchers.IO) {
+            val builder = StringBuilder().apply {
+                append("command=").append(command.command)
+                command.value?.let { append(";value=").append(it) }
+            }
+            client.post("$baseUrl/command") {
+                contentType(ContentType.Text.Plain)
+                setBody(builder.toString())
+            }
         }
     }
-) {
 
-    open suspend fun sendCommand(command: TrainCommand): Unit = withContext(Dispatchers.IO) {
-        val payload = CommandEncoder.encode(command)
-        client.post("$baseUrl/command") {
-            contentType(ContentType.Text.Plain)
-            setBody(payload)
+    override suspend fun pushState(state: ControlState) {
+        withContext(Dispatchers.IO) {
+            val encoded = json.encodeToString(state)
+            client.post("$baseUrl/state") {
+                contentType(ContentType.Application.Json)
+                setBody(encoded)
+            }
         }
-        Unit
     }
 
-    open suspend fun pushState(state: ControlState): Unit = withContext(Dispatchers.IO) {
-        val serialized = CommandEncoder.encodeState(state)
-        client.post("$baseUrl/state") {
-            contentType(ContentType.Application.Json)
-            setBody(serialized)
-        }
-        Unit
-    }
-
-    open suspend fun fetchTelemetry(): Telemetry = withContext(Dispatchers.IO) {
+    override suspend fun fetchTelemetry(): Telemetry = withContext(Dispatchers.IO) {
         val response = client.get("$baseUrl/telemetry").body<String>()
-        TelemetryParser.parse(response)
+        json.decodeFromString(response)
+    }
+}
+
+open class TrainRepository(
+    private val realtimeClient: CommandChannelClient,
+    private val legacyTransport: LegacyTrainTransport? = null
+) {
+    fun startRealtime(state: StateFlow<ControlState>): Job = realtimeClient.start(state)
+
+    suspend fun sendRealtimeCommand(kind: CommandKind, payload: ByteArray = byteArrayOf()) {
+        realtimeClient.sendCommand(kind, payload)
+    }
+
+    suspend fun stopRealtime() {
+        realtimeClient.stop()
+    }
+
+    @Deprecated("Legacy HTTP control path")
+    open suspend fun sendCommand(command: TrainCommand) {
+        legacyTransport?.sendCommand(command)
+    }
+
+    @Deprecated("Legacy HTTP control path")
+    open suspend fun pushState(state: ControlState) {
+        legacyTransport?.pushState(state)
+    }
+
+    @Deprecated("Legacy HTTP control path")
+    open suspend fun fetchTelemetry(): Telemetry {
+        return legacyTransport?.fetchTelemetry()
+            ?: throw IllegalStateException("Legacy transport not configured")
+    }
+
+    companion object {
+        fun create(
+            endpoint: String,
+            sessionId: UUID,
+            scope: kotlinx.coroutines.CoroutineScope,
+            httpClient: HttpClient = buildRealtimeHttpClient(HttpClient()),
+            clock: Clock = Clock.systemUTC(),
+            legacyTransport: LegacyTrainTransport? = null
+        ): TrainRepository {
+            val client = CommandChannelClient(endpoint, sessionId, httpClient, scope, clock)
+            return TrainRepository(client, legacyTransport)
+        }
     }
 }

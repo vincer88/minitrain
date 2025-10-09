@@ -10,6 +10,7 @@ int main() {
     failures += runTelemetryTests();
     failures += runCommandProcessorTests();
     failures += runTrainControllerTests();
+    failures += runCommandChannelTests();
 
     if (failures == 0) {
         std::cout << "All firmware tests passed" << std::endl;

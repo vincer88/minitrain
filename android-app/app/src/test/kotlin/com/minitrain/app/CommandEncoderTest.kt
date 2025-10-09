@@ -2,55 +2,68 @@ package com.minitrain.app
 
 import com.minitrain.app.model.ControlState
 import com.minitrain.app.model.Direction
-import com.minitrain.app.model.Telemetry
-import com.minitrain.app.model.TrainCommand
-import com.minitrain.app.network.CommandEncoder
-import com.minitrain.app.network.TelemetryParser
+import com.minitrain.app.network.CommandFrameSerializer
+import com.minitrain.app.network.CommandKind
+import com.minitrain.app.network.CommandPayloadType
+import com.minitrain.app.network.buildStateFrames
+import com.minitrain.app.network.buildHeader
+import com.minitrain.app.network.buildTogglePayload
+import com.minitrain.app.network.uuidToLittleEndian
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import java.time.Instant
+import java.util.UUID
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class CommandEncoderTest {
     @Test
-    fun `encode command with value`() {
-        val command = TrainCommand("set_speed", "1.5")
-        val encoded = CommandEncoder.encode(command)
-        assertEquals("command=set_speed;value=1.5", encoded)
+    fun `uuid is little endian`() {
+        val uuid = UUID.fromString("123e4567-e89b-12d3-a456-426614174000")
+        val encoded = uuidToLittleEndian(uuid)
+        val buffer = ByteBuffer.wrap(encoded).order(ByteOrder.LITTLE_ENDIAN)
+        val least = buffer.long
+        val most = buffer.long
+        assertEquals(uuid.leastSignificantBits, least)
+        assertEquals(uuid.mostSignificantBits, most)
     }
 
     @Test
-    fun `encode state to json`() {
-        val state = ControlState(1.2, Direction.FORWARD, headlights = true, horn = false, emergencyStop = false)
-        val json = CommandEncoder.encodeState(state)
-        assertTrue(json.contains("\"targetSpeed\":1.2"))
-        assertTrue(json.contains("\"direction\":\"FORWARD\""))
+    fun `state frames include speed and toggles`() {
+        val session = ByteArray(16) { it.toByte() }
+        var sequence = 0
+        val now = Instant.parse("2024-01-01T00:00:00Z")
+        val frames = buildStateFrames(
+            session,
+            { ++sequence },
+            { now },
+            ControlState(2.5, Direction.REVERSE, true, false, false),
+            ControlState(1.0, Direction.FORWARD, false, false, false)
+        )
+        assertTrue(frames.size >= 3)
+        val speedFrame = frames.first()
+        assertEquals(CommandPayloadType.Command, speedFrame.header.payloadType)
+        val decoded = CommandFrameSerializer.decode(CommandFrameSerializer.encode(speedFrame))
+        assertEquals(speedFrame.header.payloadSize, decoded.header.payloadSize)
+        val payload = decoded.payload
+        assertEquals(CommandKind.SetSpeed.code, payload.first())
     }
 
     @Test
-    fun `parse telemetry json`() {
-        val telemetry = Telemetry(1.0, 0.5, 11.1, 30.0, true, false, Direction.FORWARD, false)
-        val raw = CommandEncoder.encodeState(
-            ControlState(
-                targetSpeed = telemetry.speedMetersPerSecond,
-                direction = telemetry.direction,
-                headlights = telemetry.headlights,
-                horn = telemetry.horn,
-                emergencyStop = telemetry.emergencyStop
-            )
-        )
-        val parsed = TelemetryParser.parse(
-            """{
-                "speedMetersPerSecond": ${telemetry.speedMetersPerSecond},
-                "motorCurrentAmps": ${telemetry.motorCurrentAmps},
-                "batteryVoltage": ${telemetry.batteryVoltage},
-                "temperatureCelsius": ${telemetry.temperatureCelsius},
-                "headlights": ${telemetry.headlights},
-                "horn": ${telemetry.horn},
-                "direction": "${telemetry.direction}",
-                "emergencyStop": ${telemetry.emergencyStop}
-            }"""
-        )
-        assertEquals(telemetry, parsed)
-        assertTrue(raw.contains("targetSpeed"))
+    fun `toggle payload encodes boolean`() {
+        val payload = buildTogglePayload(CommandKind.ToggleHeadlights, true)
+        assertContentEquals(byteArrayOf(CommandKind.ToggleHeadlights.code, 1), payload)
+    }
+
+    @Test
+    fun `header builder preserves fields`() {
+        val session = ByteArray(16)
+        val header = buildHeader(session, 5, Instant.ofEpochSecond(10, 5), CommandPayloadType.Command, 3)
+        assertEquals(5, header.sequence)
+        assertEquals(CommandPayloadType.Command, header.payloadType)
+        assertEquals(3, header.payloadSize)
+        assertEquals(10_000_000_005L, header.timestampNanoseconds)
     }
 }
