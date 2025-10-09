@@ -10,6 +10,7 @@ add_library(minitrain_core
     src/train_state.cpp
     src/telemetry.cpp
     src/command_processor.cpp
+    src/command_channel.cpp
     src/train_controller.cpp
 )
 
@@ -26,6 +27,7 @@ add_executable(minitrain_tests
     tests/test_telemetry.cpp
     tests/test_command_processor.cpp
     tests/test_train_controller.cpp
+    tests/test_command_channel.cpp
 )
 
 target_link_libraries(minitrain_tests PRIVATE minitrain_core)
