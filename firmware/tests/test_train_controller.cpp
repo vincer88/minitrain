@@ -29,6 +29,8 @@ int runTrainControllerTests() {
     now += std::chrono::milliseconds(50);
     controller.onSpeedMeasurement(0.5F, std::chrono::milliseconds{50});
     controller.onTelemetrySample(TelemetrySample{1.2F, 0.4F, 11.2F, 29.0F, false});
+    controller.setActiveCab(ActiveCab::Front);
+    controller.setDirection(Direction::Forward);
 
     if (motorCommands.empty() || motorCommands.back() <= 0.0F) {
         std::cerr << "Motor command should be positive" << std::endl;
@@ -42,6 +44,36 @@ int runTrainControllerTests() {
     }
     if (state.failSafeActive) {
         std::cerr << "Fail-safe should not be active under nominal cadence" << std::endl;
+        return 1;
+    }
+    if (state.lightsState != LightsState::FrontWhiteRearRed || state.lightsSource != LightsSource::Automatic ||
+        state.activeCab != ActiveCab::Front) {
+        std::cerr << "Automatic lighting should prefer front white / rear red with front cab" << std::endl;
+        return 1;
+    }
+
+    controller.setActiveCab(ActiveCab::Rear);
+    controller.setDirection(Direction::Reverse);
+    auto reverseState = controller.state();
+    if (reverseState.lightsState != LightsState::FrontWhiteRearRed || reverseState.activeCab != ActiveCab::Rear) {
+        std::cerr << "Reverse movement with rear cab should light the leading end" << std::endl;
+        return 1;
+    }
+
+    controller.setActiveCab(ActiveCab::None);
+    auto noCabState = controller.state();
+    if (noCabState.lightsState != LightsState::BothRed || noCabState.lightsSource != LightsSource::Automatic) {
+        std::cerr << "Absence of cab should yield bilateral red lights" << std::endl;
+        return 1;
+    }
+
+    controller.setActiveCab(ActiveCab::Front);
+    controller.setDirection(Direction::Forward);
+    controller.setLightsOverride(0x02U | 0x04U, false);
+    auto overrideState = controller.state();
+    if (overrideState.lightsSource != LightsSource::Override ||
+        overrideState.lightsState != LightsState::FrontRedRearWhite || overrideState.lightsOverrideMask != (0x02U | 0x04U)) {
+        std::cerr << "Override mask should force rear white and front red" << std::endl;
         return 1;
     }
 
@@ -84,7 +116,6 @@ int runTrainControllerTests() {
         return 1;
     }
 
-    controller.toggleHeadlights(false);
     motorCommands.clear();
     controller.registerCommandTimestamp(now - staleThreshold - std::chrono::milliseconds(50));
     now += std::chrono::milliseconds(200);
@@ -99,8 +130,8 @@ int runTrainControllerTests() {
         std::cerr << "Motor command should be forced to zero during fail-safe" << std::endl;
         return 1;
     }
-    if (!failState.headlights) {
-        std::cerr << "Headlights should be forced on during fail-safe ramp" << std::endl;
+    if (failState.lightsState != LightsState::BothRed || failState.lightsSource != LightsSource::FailSafe) {
+        std::cerr << "Fail-safe should force bilateral red lights" << std::endl;
         return 1;
     }
     if (failState.targetSpeed > 0.5F) {
@@ -109,7 +140,8 @@ int runTrainControllerTests() {
     }
 
     controller.onTelemetrySample(TelemetrySample{0.6F, 0.3F, 10.9F, 28.0F, false});
-    if (publishedTelemetry.back().failSafeActive != true) {
+    if (publishedTelemetry.back().failSafeActive != true ||
+        publishedTelemetry.back().lightsSource != LightsSource::FailSafe) {
         std::cerr << "Telemetry should expose fail-safe state" << std::endl;
         return 1;
     }
@@ -132,11 +164,13 @@ int runTrainControllerTests() {
         std::cerr << "Fail-safe should clear after fresh command" << std::endl;
         return 1;
     }
-    if (recoveredState.headlights) {
-        std::cerr << "Headlights should restore user preference after fail-safe" << std::endl;
+    if (recoveredState.lightsSource != LightsSource::Override ||
+        recoveredState.lightsState != LightsState::FrontRedRearWhite) {
+        std::cerr << "Override lighting should be restored after fail-safe" << std::endl;
         return 1;
     }
 
+    controller.setLightsOverride(0x00U, false);
     controller.setTargetSpeed(0.0F);
     controller.setDirection(Direction::Forward);
 

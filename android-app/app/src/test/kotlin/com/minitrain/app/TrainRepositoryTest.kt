@@ -1,7 +1,10 @@
 package com.minitrain.app
 
+import com.minitrain.app.model.ActiveCab
 import com.minitrain.app.model.ControlState
 import com.minitrain.app.model.Direction
+import com.minitrain.app.model.LightsSource
+import com.minitrain.app.model.LightsState
 import com.minitrain.app.model.Telemetry
 import com.minitrain.app.model.TrainCommand
 import com.minitrain.app.network.CommandChannelClient
@@ -75,7 +78,21 @@ class TrainRepositoryTest {
 
     @Test
     fun `fetch telemetry parses json`() = runTest(StandardTestDispatcher()) {
-        val telemetry = Telemetry(1.0, 0.5, 11.1, 30.0, true, false, Direction.FORWARD, false)
+        val telemetry = Telemetry(
+            1.0,
+            0.5,
+            11.1,
+            30.0,
+            true,
+            false,
+            Direction.FORWARD,
+            false,
+            ActiveCab.FRONT,
+            LightsState.FRONT_WHITE_REAR_RED,
+            LightsSource.AUTOMATIC,
+            0,
+            false
+        )
         val json = Json { encodeDefaults = true }
         val engine = MockEngine {
             respond(

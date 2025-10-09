@@ -9,8 +9,10 @@ namespace minitrain::tests {
 int runTelemetryTests() {
     TelemetryAggregator aggregator{3};
     aggregator.addSample(TelemetrySample{1.0F, 0.5F, 11.1F, 30.0F, false});
-    aggregator.addSample(TelemetrySample{1.5F, 0.6F, 11.0F, 31.0F, false});
-    aggregator.addSample(TelemetrySample{2.0F, 0.7F, 10.9F, 32.0F, true});
+    aggregator.addSample(TelemetrySample{1.5F, 0.6F, 11.0F, 31.0F, false, LightsState::BothRed, LightsSource::Automatic,
+                                         ActiveCab::None, 0x00U, false});
+    aggregator.addSample(TelemetrySample{2.0F, 0.7F, 10.9F, 32.0F, true, LightsState::FrontWhiteRearRed,
+                                         LightsSource::Override, ActiveCab::Front, 0x01U, false});
 
     auto avg = aggregator.average();
     if (!avg) {
@@ -25,8 +27,13 @@ int runTelemetryTests() {
         std::cerr << "Fail-safe flag should aggregate with OR" << std::endl;
         return 1;
     }
+    if (avg->lightsState != LightsState::FrontWhiteRearRed || avg->lightsSource != LightsSource::Override) {
+        std::cerr << "Latest lights metadata should be preserved in averages" << std::endl;
+        return 1;
+    }
 
-    aggregator.addSample(TelemetrySample{2.5F, 0.8F, 10.8F, 33.0F, false});
+    aggregator.addSample(TelemetrySample{2.5F, 0.8F, 10.8F, 33.0F, false, LightsState::BothRed, LightsSource::Automatic,
+                                         ActiveCab::None, 0x00U, false});
     auto history = aggregator.history();
     if (history.size() != 3 || history.front().speedMetersPerSecond != 1.5F) {
         std::cerr << "Aggregator should drop old samples" << std::endl;

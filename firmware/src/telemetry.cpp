@@ -36,6 +36,12 @@ std::optional<TelemetrySample> TelemetryAggregator::average() const {
     result.batteryVoltage /= size;
     result.temperatureCelsius /= size;
     result.failSafeActive = anyFailSafe;
+    const auto &latest = samples_.back();
+    result.lightsState = latest.lightsState;
+    result.lightsSource = latest.lightsSource;
+    result.activeCab = latest.activeCab;
+    result.lightsOverrideMask = latest.lightsOverrideMask;
+    result.lightsTelemetryOnly = latest.lightsTelemetryOnly;
 
     return result;
 }

@@ -36,8 +36,14 @@ void TrainState::setDirection(Direction newDirection) {
     lastUpdated = std::chrono::steady_clock::now();
 }
 
-void TrainState::setHeadlights(bool enabled) {
-    headlights = enabled;
+void TrainState::setActiveCab(ActiveCab cab) {
+    activeCab = cab;
+    lastUpdated = std::chrono::steady_clock::now();
+}
+
+void TrainState::setLightsOverride(std::uint8_t mask, bool telemetryOnly) {
+    lightsOverrideMask = mask;
+    lightsTelemetryOnly = telemetryOnly;
     lastUpdated = std::chrono::steady_clock::now();
 }
 

@@ -26,13 +26,15 @@ data class CommandFrameHeader(
     val sequence: Int,
     val timestampNanoseconds: Long,
     val payloadType: CommandPayloadType,
-    val payloadSize: Int
+    val payloadSize: Int,
+    val lightsOverride: Byte,
+    val lightsFlags: Byte
 )
 
 data class CommandFrame(val header: CommandFrameHeader, val payload: ByteArray)
 
 object CommandFrameSerializer {
-    private const val HEADER_SIZE = 16 + 4 + 8 + 2 + 2
+    private const val HEADER_SIZE = 16 + 4 + 8 + 2 + 2 + 1 + 1
 
     fun encode(frame: CommandFrame): ByteArray {
         val buffer = ByteBuffer.allocate(HEADER_SIZE + frame.payload.size)
@@ -42,6 +44,8 @@ object CommandFrameSerializer {
         buffer.putLong(frame.header.timestampNanoseconds)
         buffer.putShort(frame.header.payloadType.code)
         buffer.putShort(frame.header.payloadSize.toShort())
+        buffer.put(frame.header.lightsOverride)
+        buffer.put(frame.header.lightsFlags)
         buffer.put(frame.payload)
         return buffer.array()
     }
@@ -57,6 +61,8 @@ object CommandFrameSerializer {
         val timestamp = byteBuffer.long
         val payloadTypeCode = byteBuffer.short
         val payloadSize = byteBuffer.short.toInt() and 0xFFFF
+        val lightsOverride = byteBuffer.get()
+        val lightsFlags = byteBuffer.get()
         if (buffer.size < HEADER_SIZE + payloadSize) {
             throw IllegalArgumentException("Incomplete payload")
         }
@@ -64,7 +70,10 @@ object CommandFrameSerializer {
         byteBuffer.get(payload)
         val payloadType = CommandPayloadType.entries.firstOrNull { it.code == payloadTypeCode }
             ?: throw IllegalArgumentException("Unknown payload type")
-        return CommandFrame(CommandFrameHeader(sessionId, sequence, timestamp, payloadType, payloadSize), payload)
+        return CommandFrame(
+            CommandFrameHeader(sessionId, sequence, timestamp, payloadType, payloadSize, lightsOverride, lightsFlags),
+            payload
+        )
     }
 }
 
@@ -102,20 +111,18 @@ fun buildTogglePayload(kind: CommandKind, enabled: Boolean): ByteArray {
 
 fun buildEmergencyPayload(): ByteArray = byteArrayOf(CommandKind.EmergencyStop.code)
 
-fun Direction.toProtocolValue(): String = when (this) {
-    Direction.FORWARD -> "forward"
-    Direction.REVERSE -> "reverse"
-}
 
 fun buildHeader(
     sessionId: ByteArray,
     sequence: Int,
     timestamp: Instant,
     payloadType: CommandPayloadType,
-    payloadSize: Int
+    payloadSize: Int,
+    lightsOverride: Byte = 0,
+    lightsFlags: Byte = 0
 ): CommandFrameHeader {
     val nanos = timestamp.epochSecond * 1_000_000_000L + timestamp.nano
-    return CommandFrameHeader(sessionId, sequence, nanos, payloadType, payloadSize)
+    return CommandFrameHeader(sessionId, sequence, nanos, payloadType, payloadSize, lightsOverride, lightsFlags)
 }
 
 fun buildStateFrames(
