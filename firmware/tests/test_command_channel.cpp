@@ -92,7 +92,8 @@ int runCommandChannelTests() {
         ++failures;
     }
 
-    TelemetrySample sample{3.0F, 0.4F, 11.1F, 35.0F, true};
+    TelemetrySample sample{3.0F, 0.4F, 11.1F, 35.0F, true, LightsState::FrontWhiteRearRed, LightsSource::Automatic,
+                           ActiveCab::Front, 0x03U, false};
     channel.publishTelemetry(sample, 42);
     if (clientPtr->sent.empty()) {
         std::cerr << "Telemetry frame should have been sent" << std::endl;
@@ -103,11 +104,15 @@ int runCommandChannelTests() {
             std::cerr << "Telemetry header invalid" << std::endl;
             ++failures;
         }
-        if (frame.payload.size() != sizeof(float) * 5) {
+        if (frame.header.lightsOverride != sample.lightsOverrideMask) {
+            std::cerr << "Telemetry header should mirror override mask" << std::endl;
+            ++failures;
+        }
+        if (frame.payload.size() != sizeof(float) * 9) {
             std::cerr << "Telemetry payload size mismatch" << std::endl;
             ++failures;
         }
-        if (frame.payload.size() == sizeof(float) * 5) {
+        if (frame.payload.size() == sizeof(float) * 9) {
             float failSafeFlag;
             std::memcpy(&failSafeFlag, frame.payload.data() + 4 * sizeof(float), sizeof(float));
 #if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
@@ -119,6 +124,19 @@ int runCommandChannelTests() {
 #endif
             if (failSafeFlag < 0.9F) {
                 std::cerr << "Fail-safe flag should be encoded as 1.0F" << std::endl;
+                ++failures;
+            }
+            float encodedLightsState;
+            std::memcpy(&encodedLightsState, frame.payload.data() + 5 * sizeof(float), sizeof(float));
+#if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+            std::uint32_t lightsBits;
+            std::memcpy(&lightsBits, &encodedLightsState, sizeof(float));
+            lightsBits = ((lightsBits & 0x000000FFU) << 24U) | ((lightsBits & 0x0000FF00U) << 8U) |
+                         ((lightsBits & 0x00FF0000U) >> 8U) | ((lightsBits & 0xFF000000U) >> 24U);
+            std::memcpy(&encodedLightsState, &lightsBits, sizeof(float));
+#endif
+            if (static_cast<int>(encodedLightsState + 0.5F) != static_cast<int>(sample.lightsState)) {
+                std::cerr << "Telemetry should encode lights state" << std::endl;
                 ++failures;
             }
         }

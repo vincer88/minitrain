@@ -3,6 +3,7 @@
 #include <chrono>
 #include <functional>
 #include <mutex>
+#include <cstdint>
 
 #include "minitrain/pid_controller.hpp"
 #include "minitrain/telemetry.hpp"
@@ -36,6 +37,8 @@ class TrainController {
     void toggleHeadlights(bool enabled);
     void toggleHorn(bool enabled);
     void triggerEmergencyStop();
+    void setActiveCab(ActiveCab cab);
+    void setLightsOverride(std::uint8_t mask, bool telemetryOnly);
 
     void onSpeedMeasurement(float measuredSpeed, std::chrono::steady_clock::duration dt);
     void onTelemetrySample(const TelemetrySample &sample);

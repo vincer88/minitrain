@@ -67,12 +67,23 @@ int runCommandProcessorTests() {
         std::vector<std::uint8_t> payload = {1};
         auto frame = makeFrame(CommandKind::ToggleHeadlights, payload);
         auto result = processor.processFrame(frame, baseTime + std::chrono::milliseconds(60));
-        if (!result.success || !controller.state().headlights) {
-            std::cerr << "ToggleHeadlights command failed" << std::endl;
+        if (!result.success || controller.state().lightsOverrideMask != 0x01U ||
+            controller.state().lightsSource != LightsSource::Override) {
+            std::cerr << "ToggleHeadlights command should enable override mask" << std::endl;
             ++failures;
         }
         if (!processor.lowFrequencyFallbackActive()) {
             std::cerr << "Expected low frequency fallback" << std::endl;
+            ++failures;
+        }
+    }
+
+    {
+        auto frame = makeFrame(CommandKind::SetSpeed, encodeFloat(1.0F));
+        frame.header.lightsOverride = 0x02U;
+        auto result = processor.processFrame(frame, baseTime + std::chrono::milliseconds(65));
+        if (!result.success || controller.state().lightsOverrideMask != 0x02U) {
+            std::cerr << "Header lights override mask should update controller state" << std::endl;
             ++failures;
         }
     }

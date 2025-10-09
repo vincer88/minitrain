@@ -15,6 +15,7 @@ add_library(minitrain_core
     src/command_processor.cpp
     src/command_channel.cpp
     src/train_controller.cpp
+    src/light_controller.cpp
 )
 
 target_include_directories(minitrain_core PUBLIC include)

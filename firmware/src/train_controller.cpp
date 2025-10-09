@@ -1,5 +1,7 @@
 #include "minitrain/train_controller.hpp"
 
+#include "minitrain/light_controller.hpp"
+
 #include <algorithm>
 
 namespace minitrain {
@@ -7,6 +9,10 @@ namespace minitrain {
 namespace {
 constexpr float clampMotorCommand(float value) {
     return std::max(0.0F, std::min(1.0F, value));
+}
+
+void updateLights(TrainState &state) {
+    LightController::applyAutomaticLogic(state);
 }
 } // namespace
 
@@ -31,16 +37,25 @@ void TrainController::setTargetSpeed(float metersPerSecond) {
     if (state_.emergencyStop && metersPerSecond > 0.0F) {
         state_.emergencyStop = false;
     }
+    updateLights(state_);
 }
 
 void TrainController::setDirection(Direction direction) {
     std::scoped_lock lock(mutex_);
     state_.setDirection(direction);
+    if (direction == Direction::Neutral) {
+        state_.setActiveCab(ActiveCab::None);
+    } else if (state_.activeCab == ActiveCab::None) {
+        state_.setActiveCab(direction == Direction::Forward ? ActiveCab::Front : ActiveCab::Rear);
+    }
+    updateLights(state_);
 }
 
 void TrainController::toggleHeadlights(bool enabled) {
     std::scoped_lock lock(mutex_);
-    state_.setHeadlights(enabled);
+    const std::uint8_t mask = enabled ? 0x01U : 0x00U;
+    state_.setLightsOverride(mask, false);
+    updateLights(state_);
 }
 
 void TrainController::toggleHorn(bool enabled) {
@@ -48,11 +63,26 @@ void TrainController::toggleHorn(bool enabled) {
     state_.setHorn(enabled);
 }
 
+void TrainController::setActiveCab(ActiveCab cab) {
+    std::scoped_lock lock(mutex_);
+    state_.setActiveCab(cab);
+    updateLights(state_);
+}
+
+void TrainController::setLightsOverride(std::uint8_t mask, bool telemetryOnly) {
+    std::scoped_lock lock(mutex_);
+    state_.setLightsOverride(mask, telemetryOnly);
+    if (!telemetryOnly) {
+        updateLights(state_);
+    }
+}
+
 void TrainController::triggerEmergencyStop() {
     std::scoped_lock lock(mutex_);
     state_.applyEmergencyStop();
     pid_.reset();
     motorWriter_(0.0F);
+    updateLights(state_);
 }
 
 void TrainController::onSpeedMeasurement(float measuredSpeed, std::chrono::steady_clock::duration dt) {
@@ -69,18 +99,21 @@ void TrainController::onSpeedMeasurement(float measuredSpeed, std::chrono::stead
             state_.failSafeActive = true;
             state_.realtime.failSafeRampStart = now;
             state_.realtime.failSafeInitialTarget = state_.targetSpeed;
-            state_.realtime.headlightsBeforeFailSafe = state_.headlights;
-            state_.realtime.headlightsLatched = true;
-            state_.setHeadlights(true);
+            state_.realtime.lightsBeforeFailSafe = state_.lightsState;
+            state_.realtime.lightsSourceBeforeFailSafe = state_.lightsSource;
+            state_.realtime.lightsLatched = true;
         }
     } else if (state_.failSafeActive) {
         state_.failSafeActive = false;
         state_.realtime.failSafeRampStart.reset();
-        if (state_.realtime.headlightsLatched) {
-            state_.setHeadlights(state_.realtime.headlightsBeforeFailSafe);
-            state_.realtime.headlightsLatched = false;
+        if (state_.realtime.lightsLatched) {
+            state_.lightsState = state_.realtime.lightsBeforeFailSafe;
+            state_.lightsSource = state_.realtime.lightsSourceBeforeFailSafe;
+            state_.realtime.lightsLatched = false;
         }
     }
+
+    updateLights(state_);
 
     if (state_.failSafeActive) {
         const auto rampDuration = state_.failSafeRampDuration.count() <= 0
@@ -100,6 +133,7 @@ void TrainController::onSpeedMeasurement(float measuredSpeed, std::chrono::stead
             }
             if (rampDuration == std::chrono::steady_clock::duration::zero() || elapsed >= rampDuration) {
                 state_.setDirection(Direction::Neutral);
+                state_.setActiveCab(ActiveCab::None);
             }
         } else {
             state_.realtime.failSafeRampStart = now;
@@ -116,6 +150,11 @@ void TrainController::onTelemetrySample(const TelemetrySample &sample) {
     std::scoped_lock lock(mutex_);
     TelemetrySample enriched = sample;
     enriched.failSafeActive = state_.failSafeActive;
+    enriched.lightsState = state_.lightsState;
+    enriched.lightsSource = state_.lightsSource;
+    enriched.activeCab = state_.activeCab;
+    enriched.lightsOverrideMask = state_.lightsOverrideMask;
+    enriched.lightsTelemetryOnly = state_.lightsTelemetryOnly;
     telemetryAggregator_.addSample(enriched);
     state_.setBatteryVoltage(sample.batteryVoltage);
     telemetryPublisher_(enriched);
@@ -127,11 +166,13 @@ void TrainController::registerCommandTimestamp(std::chrono::steady_clock::time_p
     if (state_.failSafeActive) {
         state_.failSafeActive = false;
         state_.realtime.failSafeRampStart.reset();
-        if (state_.realtime.headlightsLatched) {
-            state_.setHeadlights(state_.realtime.headlightsBeforeFailSafe);
-            state_.realtime.headlightsLatched = false;
+        if (state_.realtime.lightsLatched) {
+            state_.lightsState = state_.realtime.lightsBeforeFailSafe;
+            state_.lightsSource = state_.realtime.lightsSourceBeforeFailSafe;
+            state_.realtime.lightsLatched = false;
         }
     }
+    updateLights(state_);
 }
 
 TrainState TrainController::state() const {

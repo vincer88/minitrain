@@ -33,6 +33,10 @@ CommandResult CommandProcessor::processFrame(const CommandFrame &frame, std::chr
         return {false, "Unsupported payload type"};
     }
 
+    const std::uint8_t lightsMask = frame.header.lightsOverride;
+    const bool telemetryOnly = (frame.header.lightsFlags & 0x80U) != 0;
+    controller_.setLightsOverride(lightsMask, telemetryOnly);
+
     if (lastArrival_) {
         const auto delta = arrival - *lastArrival_;
         if (delta <= std::chrono::milliseconds(30)) {

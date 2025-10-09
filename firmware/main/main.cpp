@@ -119,8 +119,11 @@ int main() {
         }
 
         controller.onSpeedMeasurement(controller.state().targetSpeed * 0.8F, 100ms);
-        controller.onTelemetrySample(
-            TelemetrySample{controller.state().targetSpeed, 0.5F, 11.1F, 30.0F, controller.state().failSafeActive});
+        auto currentState = controller.state();
+        controller.onTelemetrySample(TelemetrySample{currentState.targetSpeed, 0.5F, 11.1F, 30.0F, currentState.failSafeActive,
+                                                     currentState.lightsState, currentState.lightsSource,
+                                                     currentState.activeCab, currentState.lightsOverrideMask,
+                                                     currentState.lightsTelemetryOnly});
     }
 
     return 0;

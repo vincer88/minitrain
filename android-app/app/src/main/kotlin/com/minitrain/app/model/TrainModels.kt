@@ -8,6 +8,29 @@ enum class Direction {
 }
 
 @Serializable
+enum class ActiveCab {
+    NONE,
+    FRONT,
+    REAR
+}
+
+@Serializable
+enum class LightsState {
+    BOTH_RED,
+    FRONT_WHITE_REAR_RED,
+    FRONT_RED_REAR_WHITE,
+    BOTH_OFF,
+    BOTH_WHITE
+}
+
+@Serializable
+enum class LightsSource {
+    AUTOMATIC,
+    OVERRIDE,
+    FAIL_SAFE
+}
+
+@Serializable
 data class TrainCommand(
     val command: String,
     val value: String? = null
@@ -22,7 +45,12 @@ data class Telemetry(
     val headlights: Boolean,
     val horn: Boolean,
     val direction: Direction,
-    val emergencyStop: Boolean
+    val emergencyStop: Boolean,
+    val activeCab: ActiveCab,
+    val lightsState: LightsState,
+    val lightsSource: LightsSource,
+    val lightsOverrideMask: Int,
+    val lightsTelemetryOnly: Boolean
 )
 
 @Serializable

@@ -22,6 +22,8 @@ struct CommandFrameHeader {
     std::uint64_t timestampNanoseconds{0};
     std::uint16_t payloadType{0};
     std::uint16_t payloadSize{0};
+    std::uint8_t lightsOverride{0};
+    std::uint8_t lightsFlags{0};
 };
 
 enum class CommandPayloadType : std::uint16_t {

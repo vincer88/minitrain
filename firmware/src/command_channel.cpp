@@ -96,7 +96,9 @@ void CommandChannel::publishTelemetry(const TelemetrySample &sample, std::uint32
                                              std::chrono::steady_clock::now().time_since_epoch())
                                              .count());
     frame.header.payloadType = static_cast<std::uint16_t>(CommandPayloadType::Heartbeat);
-    frame.payload.resize(sizeof(float) * 5);
+    frame.header.lightsOverride = sample.lightsOverrideMask;
+    frame.header.lightsFlags = sample.lightsTelemetryOnly ? 0x80U : 0x00U;
+    frame.payload.resize(sizeof(float) * 9);
 
     auto encodeFloat = [](float value, std::uint8_t *out) {
         std::uint32_t bits;
@@ -105,11 +107,16 @@ void CommandChannel::publishTelemetry(const TelemetrySample &sample, std::uint32
         std::memcpy(out, &bits, sizeof(float));
     };
 
-    encodeFloat(sample.speedMetersPerSecond, frame.payload.data());
-    encodeFloat(sample.motorCurrentAmps, frame.payload.data() + sizeof(float));
-    encodeFloat(sample.batteryVoltage, frame.payload.data() + 2 * sizeof(float));
-    encodeFloat(sample.temperatureCelsius, frame.payload.data() + 3 * sizeof(float));
-    encodeFloat(sample.failSafeActive ? 1.0F : 0.0F, frame.payload.data() + 4 * sizeof(float));
+    auto *payload = frame.payload.data();
+    encodeFloat(sample.speedMetersPerSecond, payload);
+    encodeFloat(sample.motorCurrentAmps, payload + sizeof(float));
+    encodeFloat(sample.batteryVoltage, payload + 2 * sizeof(float));
+    encodeFloat(sample.temperatureCelsius, payload + 3 * sizeof(float));
+    encodeFloat(sample.failSafeActive ? 1.0F : 0.0F, payload + 4 * sizeof(float));
+    encodeFloat(static_cast<float>(sample.lightsState), payload + 5 * sizeof(float));
+    encodeFloat(static_cast<float>(sample.lightsSource), payload + 6 * sizeof(float));
+    encodeFloat(static_cast<float>(sample.activeCab), payload + 7 * sizeof(float));
+    encodeFloat(static_cast<float>(sample.lightsOverrideMask), payload + 8 * sizeof(float));
 
     client_->sendBinary(encodeFrame(frame));
 }

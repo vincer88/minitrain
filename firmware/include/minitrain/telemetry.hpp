@@ -5,6 +5,8 @@
 #include <optional>
 #include <vector>
 
+#include "minitrain/train_state.hpp"
+
 namespace minitrain {
 
 struct TelemetrySample {
@@ -13,6 +15,11 @@ struct TelemetrySample {
     float batteryVoltage{0.0F};
     float temperatureCelsius{0.0F};
     bool failSafeActive{false};
+    LightsState lightsState{LightsState::BothRed};
+    LightsSource lightsSource{LightsSource::Automatic};
+    ActiveCab activeCab{ActiveCab::None};
+    std::uint8_t lightsOverrideMask{0};
+    bool lightsTelemetryOnly{false};
 };
 
 class TelemetryAggregator {
