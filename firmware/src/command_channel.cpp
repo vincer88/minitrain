@@ -96,7 +96,7 @@ void CommandChannel::publishTelemetry(const TelemetrySample &sample, std::uint32
                                              std::chrono::steady_clock::now().time_since_epoch())
                                              .count());
     frame.header.payloadType = static_cast<std::uint16_t>(CommandPayloadType::Heartbeat);
-    frame.payload.resize(sizeof(float) * 4);
+    frame.payload.resize(sizeof(float) * 5);
 
     auto encodeFloat = [](float value, std::uint8_t *out) {
         std::uint32_t bits;
@@ -109,6 +109,7 @@ void CommandChannel::publishTelemetry(const TelemetrySample &sample, std::uint32
     encodeFloat(sample.motorCurrentAmps, frame.payload.data() + sizeof(float));
     encodeFloat(sample.batteryVoltage, frame.payload.data() + 2 * sizeof(float));
     encodeFloat(sample.temperatureCelsius, frame.payload.data() + 3 * sizeof(float));
+    encodeFloat(sample.failSafeActive ? 1.0F : 0.0F, frame.payload.data() + 4 * sizeof(float));
 
     client_->sendBinary(encodeFrame(frame));
 }

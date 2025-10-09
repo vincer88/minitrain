@@ -119,7 +119,8 @@ int main() {
         }
 
         controller.onSpeedMeasurement(controller.state().targetSpeed * 0.8F, 100ms);
-        controller.onTelemetrySample(TelemetrySample{controller.state().targetSpeed, 0.5F, 11.1F, 30.0F});
+        controller.onTelemetrySample(
+            TelemetrySample{controller.state().targetSpeed, 0.5F, 11.1F, 30.0F, controller.state().failSafeActive});
     }
 
     return 0;

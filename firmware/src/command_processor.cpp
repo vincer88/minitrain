@@ -45,11 +45,19 @@ CommandResult CommandProcessor::processFrame(const CommandFrame &frame, std::chr
     }
     lastArrival_ = arrival;
 
+    auto remoteTimestamp = frame.header.timestampNanoseconds == 0
+                               ? arrival
+                               : std::chrono::steady_clock::time_point{
+                                     std::chrono::steady_clock::duration{
+                                         std::chrono::nanoseconds{frame.header.timestampNanoseconds}}};
+
     if (frame.header.payloadType == static_cast<std::uint16_t>(CommandPayloadType::LegacyText)) {
+        controller_.registerCommandTimestamp(remoteTimestamp);
         return handleLegacyPayload(frame.payload);
     }
 
     const auto payload = parsePayload(frame.payload);
+    controller_.registerCommandTimestamp(remoteTimestamp);
     return handlePayload(payload);
 }
 
