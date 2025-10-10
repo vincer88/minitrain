@@ -155,6 +155,9 @@ void TrainController::onTelemetrySample(const TelemetrySample &sample) {
     enriched.activeCab = state_.activeCab;
     enriched.lightsOverrideMask = state_.lightsOverrideMask;
     enriched.lightsTelemetryOnly = state_.lightsTelemetryOnly;
+    enriched.appliedSpeedMetersPerSecond = state_.appliedSpeed;
+    enriched.appliedDirection = state_.direction;
+    enriched.source = TelemetrySource::Instantaneous;
     telemetryAggregator_.addSample(enriched);
     state_.setBatteryVoltage(sample.batteryVoltage);
     telemetryPublisher_(enriched);
