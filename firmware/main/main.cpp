@@ -1,14 +1,18 @@
 #include <chrono>
 #include <cctype>
 #include <iostream>
+#include <memory>
 #include <sstream>
 #include <thread>
 #include <unordered_map>
 
 #include "minitrain/command_channel.hpp"
 #include "minitrain/command_processor.hpp"
+#include "minitrain/secure_websocket_client.hpp"
 #include "minitrain/pid_controller.hpp"
 #include "minitrain/train_controller.hpp"
+
+#include "tls_credentials.hpp"
 
 using namespace std::chrono_literals;
 
@@ -62,6 +66,13 @@ int main() {
 
     TrainController controller(PidController{0.8F, 0.2F, 0.05F, 0.0F, 1.0F}, motorWriter, telemetryPublisher);
 
+    std::unique_ptr<minitrain::SecureWebSocketClient> websocket;
+    try {
+        websocket = std::make_unique<minitrain::SecureWebSocketClient>(minitrain::config::loadTlsCredentialConfig());
+    } catch (const std::exception &ex) {
+        std::cout << "WARN: secure WebSocket disabled - " << ex.what() << '\n';
+    }
+
     CommandProcessor processor(
         controller, [&controller](const std::string &commandText) -> minitrain::CommandResult {
             const auto pairs = parseKeyValuePairs(commandText);
@@ -102,6 +113,26 @@ int main() {
             return {false, "Unknown command"};
         });
 
+    if (websocket) {
+        websocket->setOnConnected([]() { std::cout << "Secure command channel connected" << '\n'; });
+        websocket->setOnDisconnected([]() { std::cout << "Secure command channel disconnected" << '\n'; });
+        websocket->setMessageHandler([&processor](const std::string &payload) {
+            minitrain::CommandFrame inbound;
+            inbound.header.payloadType = static_cast<std::uint16_t>(CommandPayloadType::LegacyText);
+            inbound.payload.assign(payload.begin(), payload.end());
+            try {
+                auto now = std::chrono::steady_clock::now();
+                auto result = processor.processFrame(inbound, now);
+                std::cout << (result.success ? "OK: " : "ERR: ") << result.message << " (secure)" << '\n';
+            } catch (const std::exception &ex) {
+                std::cout << "ERR: failed to process secure command: " << ex.what() << '\n';
+            }
+        });
+        if (!websocket->connect()) {
+            std::cout << "ERR: unable to open secure WebSocket session" << '\n';
+        }
+    }
+
     std::cout << "Controller ready. Type commands like 'command=set_speed;value=1.5' or 'command=emergency'" << '\n';
     std::string line;
     while (std::getline(std::cin, line)) {
@@ -136,6 +167,13 @@ int main() {
                                                    .count());
         telemetry.sequence = 0;
         controller.onTelemetrySample(telemetry);
+
+        if (websocket && websocket->isConnected()) {
+            std::ostringstream serializedTelemetry;
+            serializedTelemetry << "speed=" << telemetry.speedMetersPerSecond << ";battery=" << telemetry.batteryVoltage
+                                << ";temperature=" << telemetry.temperatureCelsius;
+            websocket->sendText(serializedTelemetry.str());
+        }
     }
 
     return 0;

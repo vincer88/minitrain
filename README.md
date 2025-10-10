@@ -4,8 +4,8 @@ Ce projet contient une implémentation complète d'un système de pilotage pour 
 
 ## Structure
 
-- `firmware/` : code C++17 modulaire (contrôleur PID, gestion des commandes, agrégation de télémétrie) avec une application console de simulation et une suite de tests unitaires.
-- `android-app/` : logique applicative Kotlin (encodage des commandes, dépôt réseau basé sur Ktor, ViewModel coroutines) et tests unitaires JVM.
+- `firmware/` : code C++17 modulaire (contrôleur PID, gestion des commandes, agrégation de télémétrie) avec une application console de simulation, une implémentation client WebSocket TLS (`wss://`) utilisant mbedTLS et une suite de tests unitaires.
+- `android-app/` : module Android (AGP) Kotlin fournissant la pile réseau Ktor avec WebSockets sécurisées, OAuth2 mTLS et tests d'instrumentation.
 
 ## Prérequis
 
@@ -22,14 +22,19 @@ cmake --build firmware/build
 ctest --test-dir firmware/build
 ```
 
-### Application Kotlin
+### Application Android
 
 ```bash
 cd android-app
 gradle test
+gradle connectedAndroidTest # instrumentation TLS/mTLS
 ```
 
-Les tests valident l'ensemble des comportements critiques : PID, agrégateur de télémétrie, traitement des commandes, logique de ViewModel et interactions réseau simulées.
+Les tests valident l'ensemble des comportements critiques : PID, agrégateur de télémétrie, traitement des commandes, logique de ViewModel et interactions réseau simulées. Les tests d'instrumentation démarrent un serveur TLS auto-signé pour vérifier l'établissement d'une session WebSocket mTLS.
+
+## Provisionnement des secrets et rotation
+
+La configuration des certificats (CA, client et clé privée) ainsi que des paramètres OAuth2 est documentée dans [`docs/security-provisioning.md`](docs/security-provisioning.md). Les paramètres Gradle et les manifestes décrivent comment injecter ces secrets via vos pipelines de provisionnement.
 
 ## Exécution via Docker
 

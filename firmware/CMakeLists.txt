@@ -26,7 +26,11 @@ target_compile_definitions(minitrain_core PUBLIC
     MINITRAIN_FAILSAFE_RAMP_MS=${MINITRAIN_FAILSAFE_RAMP_MS}
 )
 
-add_executable(minitrain_sim main/main.cpp)
+add_executable(minitrain_sim
+    main/main.cpp
+    main/secure_websocket_client.cpp
+    main/tls_credentials.cpp
+)
 target_link_libraries(minitrain_sim PRIVATE minitrain_core)
 
 add_executable(minitrain_tests
