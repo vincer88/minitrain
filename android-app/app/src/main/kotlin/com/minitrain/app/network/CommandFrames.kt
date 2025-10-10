@@ -95,7 +95,12 @@ fun buildSpeedCommandPayload(speed: Double): ByteArray {
 fun buildDirectionPayload(direction: Direction): ByteArray {
     val buffer = ByteBuffer.allocate(2)
     buffer.put(CommandKind.SetDirection.code)
-    buffer.put(if (direction == Direction.FORWARD) 0 else 1)
+    val code = when (direction) {
+        Direction.NEUTRAL -> 0
+        Direction.FORWARD -> 1
+        Direction.REVERSE -> 2
+    }
+    buffer.put(code.toByte())
     return buffer.array()
 }
 

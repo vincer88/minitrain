@@ -120,10 +120,22 @@ int main() {
 
         controller.onSpeedMeasurement(controller.state().targetSpeed * 0.8F, 100ms);
         auto currentState = controller.state();
-        controller.onTelemetrySample(TelemetrySample{currentState.targetSpeed, 0.5F, 11.1F, 30.0F, currentState.failSafeActive,
-                                                     currentState.lightsState, currentState.lightsSource,
-                                                     currentState.activeCab, currentState.lightsOverrideMask,
-                                                     currentState.lightsTelemetryOnly});
+        TelemetrySample telemetry{};
+        telemetry.speedMetersPerSecond = currentState.targetSpeed;
+        telemetry.motorCurrentAmps = 0.5F;
+        telemetry.batteryVoltage = 11.1F;
+        telemetry.temperatureCelsius = 30.0F;
+        telemetry.failSafeActive = currentState.failSafeActive;
+        telemetry.lightsState = currentState.lightsState;
+        telemetry.lightsSource = currentState.lightsSource;
+        telemetry.activeCab = currentState.activeCab;
+        telemetry.lightsOverrideMask = currentState.lightsOverrideMask;
+        telemetry.lightsTelemetryOnly = currentState.lightsTelemetryOnly;
+        telemetry.commandTimestamp = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                                   std::chrono::steady_clock::now().time_since_epoch())
+                                                   .count());
+        telemetry.sequence = 0;
+        controller.onTelemetrySample(telemetry);
     }
 
     return 0;

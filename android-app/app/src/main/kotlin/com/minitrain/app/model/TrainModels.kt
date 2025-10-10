@@ -3,6 +3,7 @@ package com.minitrain.app.model
 import kotlinx.serialization.Serializable
 
 enum class Direction {
+    NEUTRAL,
     FORWARD,
     REVERSE
 }
@@ -38,10 +39,15 @@ data class TrainCommand(
 
 @Serializable
 data class Telemetry(
+    val sessionId: String,
+    val sequence: Long,
+    val commandTimestamp: Long,
     val speedMetersPerSecond: Double,
     val motorCurrentAmps: Double,
     val batteryVoltage: Double,
     val temperatureCelsius: Double,
+    val appliedSpeedMetersPerSecond: Double,
+    val appliedDirection: Direction,
     val headlights: Boolean,
     val horn: Boolean,
     val direction: Direction,
@@ -49,9 +55,16 @@ data class Telemetry(
     val activeCab: ActiveCab,
     val lightsState: LightsState,
     val lightsSource: LightsSource,
+    val source: TelemetrySource,
     val lightsOverrideMask: Int,
     val lightsTelemetryOnly: Boolean
 )
+
+@Serializable
+enum class TelemetrySource {
+    INSTANTANEOUS,
+    AGGREGATED
+}
 
 @Serializable
 data class ControlState(

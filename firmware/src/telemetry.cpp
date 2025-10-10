@@ -27,6 +27,7 @@ std::optional<TelemetrySample> TelemetryAggregator::average() const {
         result.motorCurrentAmps += sample.motorCurrentAmps;
         result.batteryVoltage += sample.batteryVoltage;
         result.temperatureCelsius += sample.temperatureCelsius;
+        result.appliedSpeedMetersPerSecond += sample.appliedSpeedMetersPerSecond;
         anyFailSafe = anyFailSafe || sample.failSafeActive;
     }
 
@@ -35,13 +36,19 @@ std::optional<TelemetrySample> TelemetryAggregator::average() const {
     result.motorCurrentAmps /= size;
     result.batteryVoltage /= size;
     result.temperatureCelsius /= size;
+    result.appliedSpeedMetersPerSecond /= size;
     result.failSafeActive = anyFailSafe;
     const auto &latest = samples_.back();
+    result.sessionId = latest.sessionId;
+    result.sequence = latest.sequence;
+    result.commandTimestamp = latest.commandTimestamp;
     result.lightsState = latest.lightsState;
     result.lightsSource = latest.lightsSource;
     result.activeCab = latest.activeCab;
     result.lightsOverrideMask = latest.lightsOverrideMask;
     result.lightsTelemetryOnly = latest.lightsTelemetryOnly;
+    result.appliedDirection = latest.appliedDirection;
+    result.source = TelemetrySource::Aggregated;
 
     return result;
 }

@@ -28,7 +28,13 @@ int runTrainControllerTests() {
     controller.setTargetSpeed(1.5F);
     now += std::chrono::milliseconds(50);
     controller.onSpeedMeasurement(0.5F, std::chrono::milliseconds{50});
-    controller.onTelemetrySample(TelemetrySample{1.2F, 0.4F, 11.2F, 29.0F, false});
+    TelemetrySample initialSample{};
+    initialSample.speedMetersPerSecond = 1.2F;
+    initialSample.motorCurrentAmps = 0.4F;
+    initialSample.batteryVoltage = 11.2F;
+    initialSample.temperatureCelsius = 29.0F;
+    initialSample.failSafeActive = false;
+    controller.onTelemetrySample(initialSample);
     controller.setActiveCab(ActiveCab::Front);
     controller.setDirection(Direction::Forward);
 
@@ -139,7 +145,13 @@ int runTrainControllerTests() {
         return 1;
     }
 
-    controller.onTelemetrySample(TelemetrySample{0.6F, 0.3F, 10.9F, 28.0F, false});
+    TelemetrySample failSafeSample{};
+    failSafeSample.speedMetersPerSecond = 0.6F;
+    failSafeSample.motorCurrentAmps = 0.3F;
+    failSafeSample.batteryVoltage = 10.9F;
+    failSafeSample.temperatureCelsius = 28.0F;
+    failSafeSample.failSafeActive = false;
+    controller.onTelemetrySample(failSafeSample);
     if (publishedTelemetry.back().failSafeActive != true ||
         publishedTelemetry.back().lightsSource != LightsSource::FailSafe) {
         std::cerr << "Telemetry should expose fail-safe state" << std::endl;

@@ -90,15 +90,18 @@ void CommandChannel::publishTelemetry(const TelemetrySample &sample, std::uint32
     }
 
     CommandFrame frame;
-    frame.header.sessionId = config_.sessionId;
-    frame.header.sequence = sequence;
-    frame.header.timestampNanoseconds = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                             std::chrono::steady_clock::now().time_since_epoch())
-                                             .count());
+    frame.header.sessionId = sample.sessionId == std::array<std::uint8_t, 16>{}
+                                 ? config_.sessionId
+                                 : sample.sessionId;
+    frame.header.sequence = sample.sequence != 0 ? sample.sequence : sequence;
+    const auto timestampFallback = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                              std::chrono::steady_clock::now().time_since_epoch())
+                                              .count());
+    frame.header.timestampNanoseconds = sample.commandTimestamp != 0 ? sample.commandTimestamp : timestampFallback;
     frame.header.payloadType = static_cast<std::uint16_t>(CommandPayloadType::Heartbeat);
     frame.header.lightsOverride = sample.lightsOverrideMask;
     frame.header.lightsFlags = sample.lightsTelemetryOnly ? 0x80U : 0x00U;
-    frame.payload.resize(sizeof(float) * 9);
+    frame.payload.resize(sizeof(float) * 12);
 
     auto encodeFloat = [](float value, std::uint8_t *out) {
         std::uint32_t bits;
@@ -117,6 +120,9 @@ void CommandChannel::publishTelemetry(const TelemetrySample &sample, std::uint32
     encodeFloat(static_cast<float>(sample.lightsSource), payload + 6 * sizeof(float));
     encodeFloat(static_cast<float>(sample.activeCab), payload + 7 * sizeof(float));
     encodeFloat(static_cast<float>(sample.lightsOverrideMask), payload + 8 * sizeof(float));
+    encodeFloat(sample.appliedSpeedMetersPerSecond, payload + 9 * sizeof(float));
+    encodeFloat(static_cast<float>(sample.appliedDirection), payload + 10 * sizeof(float));
+    encodeFloat(static_cast<float>(sample.source), payload + 11 * sizeof(float));
 
     client_->sendBinary(encodeFrame(frame));
 }

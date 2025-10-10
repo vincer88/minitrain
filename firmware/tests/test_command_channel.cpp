@@ -92,27 +92,52 @@ int runCommandChannelTests() {
         ++failures;
     }
 
-    TelemetrySample sample{3.0F, 0.4F, 11.1F, 35.0F, true, LightsState::FrontWhiteRearRed, LightsSource::Automatic,
-                           ActiveCab::Front, 0x03U, false};
+    TelemetrySample sample{};
+    sample.speedMetersPerSecond = 3.0F;
+    sample.motorCurrentAmps = 0.4F;
+    sample.batteryVoltage = 11.1F;
+    sample.temperatureCelsius = 35.0F;
+    sample.failSafeActive = true;
+    sample.lightsState = LightsState::FrontWhiteRearRed;
+    sample.lightsSource = LightsSource::Automatic;
+    sample.activeCab = ActiveCab::Front;
+    sample.lightsOverrideMask = 0x03U;
+    sample.lightsTelemetryOnly = false;
+    sample.appliedSpeedMetersPerSecond = 2.8F;
+    sample.appliedDirection = Direction::Forward;
+    sample.sequence = 99U;
+    sample.commandTimestamp = 123456789ULL;
+    sample.source = TelemetrySource::Instantaneous;
+    sample.sessionId = {0x10U, 0x32U, 0x54U, 0x76U, 0x98U, 0xBAU, 0xDCU, 0xFEU, 0x10U, 0x32U, 0x54U, 0x76U, 0x98U, 0xBAU,
+                       0xDCU, 0xFEU};
     channel.publishTelemetry(sample, 42);
     if (clientPtr->sent.empty()) {
         std::cerr << "Telemetry frame should have been sent" << std::endl;
         ++failures;
     } else {
         auto frame = CommandChannel::decodeFrame(clientPtr->sent.back());
-        if (frame.header.sequence != 42 || frame.header.payloadType != static_cast<std::uint16_t>(CommandPayloadType::Heartbeat)) {
+        if (frame.header.sequence != sample.sequence ||
+            frame.header.payloadType != static_cast<std::uint16_t>(CommandPayloadType::Heartbeat)) {
             std::cerr << "Telemetry header invalid" << std::endl;
+            ++failures;
+        }
+        if (frame.header.timestampNanoseconds != sample.commandTimestamp) {
+            std::cerr << "Telemetry header should mirror command timestamp" << std::endl;
+            ++failures;
+        }
+        if (frame.header.sessionId != sample.sessionId) {
+            std::cerr << "Telemetry header should mirror session id" << std::endl;
             ++failures;
         }
         if (frame.header.lightsOverride != sample.lightsOverrideMask) {
             std::cerr << "Telemetry header should mirror override mask" << std::endl;
             ++failures;
         }
-        if (frame.payload.size() != sizeof(float) * 9) {
+        if (frame.payload.size() != sizeof(float) * 12) {
             std::cerr << "Telemetry payload size mismatch" << std::endl;
             ++failures;
         }
-        if (frame.payload.size() == sizeof(float) * 9) {
+        if (frame.payload.size() == sizeof(float) * 12) {
             float failSafeFlag;
             std::memcpy(&failSafeFlag, frame.payload.data() + 4 * sizeof(float), sizeof(float));
 #if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
@@ -137,6 +162,19 @@ int runCommandChannelTests() {
 #endif
             if (static_cast<int>(encodedLightsState + 0.5F) != static_cast<int>(sample.lightsState)) {
                 std::cerr << "Telemetry should encode lights state" << std::endl;
+                ++failures;
+            }
+            float appliedSpeedEncoded;
+            std::memcpy(&appliedSpeedEncoded, frame.payload.data() + 9 * sizeof(float), sizeof(float));
+#if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+            std::uint32_t appliedSpeedBits;
+            std::memcpy(&appliedSpeedBits, &appliedSpeedEncoded, sizeof(float));
+            appliedSpeedBits = ((appliedSpeedBits & 0x000000FFU) << 24U) | ((appliedSpeedBits & 0x0000FF00U) << 8U) |
+                               ((appliedSpeedBits & 0x00FF0000U) >> 8U) | ((appliedSpeedBits & 0xFF000000U) >> 24U);
+            std::memcpy(&appliedSpeedEncoded, &appliedSpeedBits, sizeof(float));
+#endif
+            if (appliedSpeedEncoded < 2.79F || appliedSpeedEncoded > 2.81F) {
+                std::cerr << "Applied speed should be encoded" << std::endl;
                 ++failures;
             }
         }

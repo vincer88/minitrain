@@ -6,6 +6,7 @@ import com.minitrain.app.model.Direction
 import com.minitrain.app.model.LightsSource
 import com.minitrain.app.model.LightsState
 import com.minitrain.app.model.Telemetry
+import com.minitrain.app.model.TelemetrySource
 import com.minitrain.app.model.TrainCommand
 import com.minitrain.app.network.CommandChannelClient
 import com.minitrain.app.network.CommandWebSocketFactory
@@ -90,19 +91,25 @@ class TrainViewModelTest {
         val repository = FakeRepository(this)
         val viewModel = TrainViewModel(repository, this)
         val telemetry = Telemetry(
-            1.0,
-            0.5,
-            11.1,
-            30.0,
-            true,
-            false,
-            Direction.FORWARD,
-            false,
-            ActiveCab.FRONT,
-            LightsState.FRONT_WHITE_REAR_RED,
-            LightsSource.AUTOMATIC,
-            0,
-            false
+            sessionId = "00000000-0000-0000-0000-000000000000",
+            sequence = 5,
+            commandTimestamp = 9876,
+            speedMetersPerSecond = 1.0,
+            motorCurrentAmps = 0.5,
+            batteryVoltage = 11.1,
+            temperatureCelsius = 30.0,
+            appliedSpeedMetersPerSecond = 0.9,
+            appliedDirection = Direction.FORWARD,
+            headlights = true,
+            horn = false,
+            direction = Direction.FORWARD,
+            emergencyStop = false,
+            activeCab = ActiveCab.FRONT,
+            lightsState = LightsState.FRONT_WHITE_REAR_RED,
+            lightsSource = LightsSource.AUTOMATIC,
+            source = TelemetrySource.INSTANTANEOUS,
+            lightsOverrideMask = 0,
+            lightsTelemetryOnly = false
         )
         repository.enqueueTelemetry(telemetry, telemetry.copy(speedMetersPerSecond = 1.5))
 

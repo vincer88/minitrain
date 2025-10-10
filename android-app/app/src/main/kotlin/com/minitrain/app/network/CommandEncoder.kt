@@ -29,6 +29,7 @@ object TelemetryParser {
 }
 
 fun Direction.toProtocolValue(): String = when (this) {
+    Direction.NEUTRAL -> "neutral"
     Direction.FORWARD -> "forward"
     Direction.REVERSE -> "reverse"
 }
