@@ -46,6 +46,8 @@ dependencies {
     implementation("io.ktor:ktor-client-auth:2.3.12")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
+    testImplementation(kotlin("test"))
+
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
     androidTestImplementation("androidx.test:runner:1.5.2")
     androidTestImplementation("androidx.test:rules:1.5.0")

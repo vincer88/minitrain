@@ -54,11 +54,41 @@ int runCommandProcessorTests() {
     }
 
     {
-        std::vector<std::uint8_t> payload = {1};
+        std::vector<std::uint8_t> payload = {0};
         auto frame = makeFrame(CommandKind::SetDirection, payload);
         auto result = processor.processFrame(frame, baseTime + std::chrono::milliseconds(18));
+        if (!result.success || controller.state().direction != Direction::Neutral) {
+            std::cerr << "SetDirection command failed to set neutral" << std::endl;
+            ++failures;
+        }
+    }
+
+    {
+        std::vector<std::uint8_t> payload = {1};
+        auto frame = makeFrame(CommandKind::SetDirection, payload);
+        auto result = processor.processFrame(frame, baseTime + std::chrono::milliseconds(30));
+        if (!result.success || controller.state().direction != Direction::Forward) {
+            std::cerr << "SetDirection command failed to set forward" << std::endl;
+            ++failures;
+        }
+    }
+
+    {
+        std::vector<std::uint8_t> payload = {2};
+        auto frame = makeFrame(CommandKind::SetDirection, payload);
+        auto result = processor.processFrame(frame, baseTime + std::chrono::milliseconds(42));
         if (!result.success || controller.state().direction != Direction::Reverse) {
-            std::cerr << "SetDirection command failed" << std::endl;
+            std::cerr << "SetDirection command failed to set reverse" << std::endl;
+            ++failures;
+        }
+    }
+
+    {
+        std::vector<std::uint8_t> payload = {99};
+        auto frame = makeFrame(CommandKind::SetDirection, payload);
+        auto result = processor.processFrame(frame, baseTime + std::chrono::milliseconds(54));
+        if (result.success || controller.state().direction != Direction::Reverse) {
+            std::cerr << "SetDirection should fail on unknown code" << std::endl;
             ++failures;
         }
     }
@@ -66,7 +96,7 @@ int runCommandProcessorTests() {
     {
         std::vector<std::uint8_t> payload = {1};
         auto frame = makeFrame(CommandKind::ToggleHeadlights, payload);
-        auto result = processor.processFrame(frame, baseTime + std::chrono::milliseconds(60));
+        auto result = processor.processFrame(frame, baseTime + std::chrono::milliseconds(120));
         if (!result.success || controller.state().lightsOverrideMask != 0x01U ||
             controller.state().lightsSource != LightsSource::Override) {
             std::cerr << "ToggleHeadlights command should enable override mask" << std::endl;

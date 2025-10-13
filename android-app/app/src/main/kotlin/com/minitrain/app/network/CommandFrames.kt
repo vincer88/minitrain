@@ -92,6 +92,9 @@ fun buildSpeedCommandPayload(speed: Double): ByteArray {
     return buffer.array()
 }
 
+/**
+ * Encodes a direction using the firmware mapping: 0 = neutral, 1 = forward, 2 = reverse.
+ */
 fun buildDirectionPayload(direction: Direction): ByteArray {
     val buffer = ByteBuffer.allocate(2)
     buffer.put(CommandKind.SetDirection.code)
