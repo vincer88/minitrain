@@ -78,7 +78,22 @@ CommandResult CommandProcessor::handlePayload(const BinaryCommandPayload &payloa
         if (payload.data.empty()) {
             return {false, "Missing direction payload"};
         }
-        controller_.setDirection(payload.data.front() == 0 ? Direction::Forward : Direction::Reverse);
+        const auto code = payload.data.front();
+        Direction direction;
+        switch (code) {
+        case 0:
+            direction = Direction::Neutral;
+            break;
+        case 1:
+            direction = Direction::Forward;
+            break;
+        case 2:
+            direction = Direction::Reverse;
+            break;
+        default:
+            return {false, "Unknown direction code"};
+        }
+        controller_.setDirection(direction);
         return {true, "Direction updated"};
     }
     case CommandKind::ToggleHeadlights: {
