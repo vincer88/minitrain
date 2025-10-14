@@ -12,6 +12,10 @@ import com.minitrain.app.network.CommandWebSocketFactory
 import com.minitrain.app.network.CommandWebSocketSession
 import com.minitrain.app.network.FailsafeRampStatus
 import com.minitrain.app.network.buildRealtimeHttpClient
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import com.minitrain.app.network.VideoStreamClient
+import com.minitrain.app.network.VideoStreamState
 import com.minitrain.app.repository.TrainRepository
 import com.minitrain.app.ui.TrainViewModel
 import io.ktor.websocket.CloseReason
@@ -29,7 +33,35 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 @Suppress("DEPRECATION")
-private class FakeRepository(scope: kotlinx.coroutines.CoroutineScope) : TrainRepository(
+private class FakeVideoStreamClient : VideoStreamClient {
+    private val _state = kotlinx.coroutines.flow.MutableStateFlow<VideoStreamState>(VideoStreamState.Idle)
+    override val state: kotlinx.coroutines.flow.StateFlow<VideoStreamState> = _state
+    override val player: Player? = null
+    val started = mutableListOf<String>()
+    var stopCount = 0
+
+    fun emit(state: VideoStreamState) {
+        _state.value = state
+    }
+
+    override fun start(url: String) {
+        started.add(url)
+        _state.value = VideoStreamState.Buffering
+    }
+
+    override fun stop() {
+        stopCount += 1
+        _state.value = VideoStreamState.Idle
+    }
+
+    override fun release() {}
+}
+
+@Suppress("DEPRECATION")
+private class FakeRepository(
+    scope: kotlinx.coroutines.CoroutineScope,
+    val videoClient: FakeVideoStreamClient = FakeVideoStreamClient()
+) : TrainRepository(
     CommandChannelClient(
         endpoint = "wss://example/ws",
         sessionId = UUID(0, 0),
@@ -42,7 +74,8 @@ private class FakeRepository(scope: kotlinx.coroutines.CoroutineScope) : TrainRe
         override suspend fun close(reason: CloseReason) {}
         override suspend fun receive(): ByteArray? = null
     } } },
-    legacyTransport = null
+    legacyTransport = null,
+    videoStreamClient = videoClient
 ) {
     private val _telemetry = kotlinx.coroutines.flow.MutableSharedFlow<Telemetry>(replay = 1)
     private val _failsafe = MutableStateFlow(FailsafeRampStatus.inactive())
@@ -59,6 +92,10 @@ private class FakeRepository(scope: kotlinx.coroutines.CoroutineScope) : TrainRe
 
     fun emitFailsafe(status: FailsafeRampStatus) {
         _failsafe.value = status
+    }
+
+    fun emitVideoState(state: VideoStreamState) {
+        videoClient.emit(state)
     }
 }
 
@@ -172,6 +209,38 @@ class TrainViewModelTest {
 
         val finalState = viewModel.controlState.first()
         assertEquals(Direction.NEUTRAL, finalState.direction)
+        viewModel.clear()
+    }
+
+    @Test
+    fun `video stream state flows through view model`() = runBlocking {
+        val videoClient = FakeVideoStreamClient()
+        val repository = FakeRepository(this, videoClient)
+        val viewModel = TrainViewModel(repository, this)
+
+        viewModel.startVideoStream("https://example.com/stream")
+        yield()
+
+        assertEquals(listOf("https://example.com/stream"), videoClient.started)
+        val buffering = viewModel.videoStreamState.first()
+        assertTrue(buffering.isBuffering)
+        assertTrue(buffering.errorMessage == null)
+
+        val mediaItem = MediaItem.Builder().setUri("https://example.com/stream").build()
+        repository.emitVideoState(VideoStreamState.Playing(mediaItem))
+        yield()
+
+        val playing = viewModel.videoStreamState.first { it.state is VideoStreamState.Playing }
+        assertFalse(playing.isBuffering)
+
+        repository.emitVideoState(VideoStreamState.Error("network error"))
+        yield()
+
+        val errorState = viewModel.videoStreamState.first { it.errorMessage != null }
+        assertEquals("network error", errorState.errorMessage)
+
+        viewModel.stopVideoStream()
+        assertEquals(1, videoClient.stopCount)
         viewModel.clear()
     }
 }

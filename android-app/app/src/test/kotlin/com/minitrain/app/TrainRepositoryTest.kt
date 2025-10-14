@@ -11,6 +11,10 @@ import com.minitrain.app.model.TrainCommand
 import com.minitrain.app.network.CommandChannelClient
 import com.minitrain.app.network.CommandWebSocketFactory
 import com.minitrain.app.network.CommandWebSocketSession
+import androidx.media3.common.Player
+import com.minitrain.app.network.UnconfiguredVideoStreamClient
+import com.minitrain.app.network.VideoStreamClient
+import com.minitrain.app.network.VideoStreamState
 import com.minitrain.app.network.buildRealtimeHttpClient
 import com.minitrain.app.repository.HttpTrainTransport
 import com.minitrain.app.repository.TrainRepository
@@ -50,7 +54,32 @@ class TrainRepositoryTest {
         override suspend fun receive(): ByteArray? = null
     }
 
-    private fun buildRepository(scope: TestScope, legacy: HttpTrainTransport, enableFallback: Boolean = true): TrainRepository {
+    private class RecordingVideoStreamClient : VideoStreamClient {
+        private val _state = kotlinx.coroutines.flow.MutableStateFlow<VideoStreamState>(VideoStreamState.Idle)
+        override val state: kotlinx.coroutines.flow.StateFlow<VideoStreamState> = _state
+        override val player: Player? = null
+        val started = mutableListOf<String>()
+        var stopCount = 0
+
+        override fun start(url: String) {
+            started.add(url)
+            _state.value = VideoStreamState.Buffering
+        }
+
+        override fun stop() {
+            stopCount += 1
+            _state.value = VideoStreamState.Idle
+        }
+
+        override fun release() {}
+    }
+
+    private fun buildRepository(
+        scope: TestScope,
+        legacy: HttpTrainTransport,
+        enableFallback: Boolean = true,
+        videoClient: VideoStreamClient = UnconfiguredVideoStreamClient()
+    ): TrainRepository {
         val client = CommandChannelClient(
             endpoint = "wss://example/ws",
             sessionId = UUID(0, 0),
@@ -58,7 +87,7 @@ class TrainRepositoryTest {
             scope = scope,
             clock = Clock.fixed(Instant.EPOCH, ZoneOffset.UTC)
         ) { _, _ -> CommandWebSocketFactory { StubSession() } }
-        return TrainRepository(client, legacy, legacyFallbackEnabled = enableFallback)
+        return TrainRepository(client, legacy, legacyFallbackEnabled = enableFallback, videoStreamClient = videoClient)
     }
 
     @Test
@@ -151,5 +180,22 @@ class TrainRepositoryTest {
         assertFailsWith<IllegalStateException> {
             repository.pushState(ControlState(0.0, Direction.FORWARD, false, false, false))
         }
+    }
+
+    @Test
+    fun `start and stop video stream delegates to client`() = runTest(StandardTestDispatcher()) {
+        val engine = MockEngine { respond("OK", HttpStatusCode.OK, headersOf()) }
+        val client = HttpClient(engine) { install(ContentNegotiation) { json() } }
+        val legacy = HttpTrainTransport("http://localhost", client)
+        val videoClient = RecordingVideoStreamClient()
+        val repository = buildRepository(this, legacy, videoClient = videoClient)
+
+        repository.startVideoStream("https://example.com/stream.m3u8")
+
+        assertEquals(listOf("https://example.com/stream.m3u8"), videoClient.started)
+        assertEquals(VideoStreamState.Buffering, videoClient.state.value)
+
+        repository.stopVideoStream()
+        assertEquals(1, videoClient.stopCount)
     }
 }

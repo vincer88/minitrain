@@ -1,11 +1,15 @@
 package com.minitrain.app.repository
 
+import androidx.media3.common.Player
 import com.minitrain.app.model.ControlState
 import com.minitrain.app.model.Telemetry
 import com.minitrain.app.model.TrainCommand
 import com.minitrain.app.network.CommandChannelClient
 import com.minitrain.app.network.FailsafeRampStatus
 import com.minitrain.app.network.TelemetryFailsafeConfig
+import com.minitrain.app.network.VideoStreamClient
+import com.minitrain.app.network.VideoStreamState
+import com.minitrain.app.network.UnconfiguredVideoStreamClient
 import com.minitrain.app.network.buildRealtimeHttpClient
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
@@ -74,7 +78,8 @@ open class HttpTrainTransport(
 open class TrainRepository(
     private val realtimeClient: CommandChannelClient,
     private val legacyTransport: LegacyTrainTransport? = null,
-    private val legacyFallbackEnabled: Boolean = false
+    private val legacyFallbackEnabled: Boolean = false,
+    private val videoStreamClient: VideoStreamClient = UnconfiguredVideoStreamClient()
 ) {
     fun startRealtime(state: StateFlow<ControlState>): Job = realtimeClient.start(state)
 
@@ -91,6 +96,12 @@ open class TrainRepository(
 
     open val failsafeRampStatus: StateFlow<FailsafeRampStatus>
         get() = realtimeClient.failsafeRampStatus
+
+    open val videoStreamState: StateFlow<VideoStreamState>
+        get() = videoStreamClient.state
+
+    open val videoPlayer: Player?
+        get() = videoStreamClient.player
 
     @Deprecated("Legacy HTTP control path")
     open suspend fun sendCommand(command: TrainCommand) {
@@ -126,10 +137,23 @@ open class TrainRepository(
             clock: Clock = Clock.systemUTC(),
             failsafeConfig: TelemetryFailsafeConfig = TelemetryFailsafeConfig(),
             legacyTransport: LegacyTrainTransport? = null,
-            legacyFallbackEnabled: Boolean = false
+            legacyFallbackEnabled: Boolean = false,
+            videoStreamClient: VideoStreamClient = UnconfiguredVideoStreamClient()
         ): TrainRepository {
             val client = CommandChannelClient(endpoint, sessionId, httpClient, scope, clock, failsafeConfig)
-            return TrainRepository(client, legacyTransport, legacyFallbackEnabled)
+            return TrainRepository(client, legacyTransport, legacyFallbackEnabled, videoStreamClient)
         }
+    }
+
+    open fun startVideoStream(url: String) {
+        videoStreamClient.start(url)
+    }
+
+    open fun stopVideoStream() {
+        videoStreamClient.stop()
+    }
+
+    open fun releaseVideoStream() {
+        videoStreamClient.release()
     }
 }
