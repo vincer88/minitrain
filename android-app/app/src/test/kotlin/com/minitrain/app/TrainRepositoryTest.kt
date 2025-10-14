@@ -39,6 +39,7 @@ import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlin.test.assertFailsWith
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class TrainRepositoryTest {
@@ -46,9 +47,10 @@ class TrainRepositoryTest {
         override val isOpen: Boolean = true
         override suspend fun send(frame: ByteArray): Boolean = true
         override suspend fun close(reason: io.ktor.websocket.CloseReason) {}
+        override suspend fun receive(): ByteArray? = null
     }
 
-    private fun buildRepository(scope: TestScope, legacy: HttpTrainTransport): TrainRepository {
+    private fun buildRepository(scope: TestScope, legacy: HttpTrainTransport, enableFallback: Boolean = true): TrainRepository {
         val client = CommandChannelClient(
             endpoint = "wss://example/ws",
             sessionId = UUID(0, 0),
@@ -56,7 +58,7 @@ class TrainRepositoryTest {
             scope = scope,
             clock = Clock.fixed(Instant.EPOCH, ZoneOffset.UTC)
         ) { _, _ -> CommandWebSocketFactory { StubSession() } }
-        return TrainRepository(client, legacy)
+        return TrainRepository(client, legacy, legacyFallbackEnabled = enableFallback)
     }
 
     @Test
@@ -135,5 +137,19 @@ class TrainRepositoryTest {
         assertTrue(contentType == null || contentType.startsWith("application/json"))
         val body = captured.body as TextContent
         assertTrue(body.text.contains("\"direction\":\"REVERSE\""))
+    }
+
+    @Test
+    fun `legacy transport disabled without flag`() = runTest(StandardTestDispatcher()) {
+        val engine = MockEngine { respond("OK", HttpStatusCode.OK, headersOf()) }
+        val client = HttpClient(engine) { install(ContentNegotiation) { json() } }
+        val legacy = HttpTrainTransport("http://localhost", client)
+        val repository = buildRepository(this, legacy, enableFallback = false)
+
+        assertFailsWith<IllegalStateException> { repository.fetchTelemetry() }
+        assertFailsWith<IllegalStateException> { repository.sendCommand(TrainCommand("test")) }
+        assertFailsWith<IllegalStateException> {
+            repository.pushState(ControlState(0.0, Direction.FORWARD, false, false, false))
+        }
     }
 }

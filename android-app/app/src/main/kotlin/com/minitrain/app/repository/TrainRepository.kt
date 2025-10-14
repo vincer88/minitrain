@@ -17,6 +17,7 @@ import io.ktor.http.contentType
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.decodeFromString
@@ -71,7 +72,8 @@ open class HttpTrainTransport(
 
 open class TrainRepository(
     private val realtimeClient: CommandChannelClient,
-    private val legacyTransport: LegacyTrainTransport? = null
+    private val legacyTransport: LegacyTrainTransport? = null,
+    private val legacyFallbackEnabled: Boolean = false
 ) {
     fun startRealtime(state: StateFlow<ControlState>): Job = realtimeClient.start(state)
 
@@ -83,18 +85,30 @@ open class TrainRepository(
         realtimeClient.stop()
     }
 
+    open val telemetry: Flow<Telemetry>
+        get() = realtimeClient.telemetry
+
     @Deprecated("Legacy HTTP control path")
     open suspend fun sendCommand(command: TrainCommand) {
+        if (!legacyFallbackEnabled) {
+            error("Legacy transport disabled")
+        }
         legacyTransport?.sendCommand(command)
     }
 
     @Deprecated("Legacy HTTP control path")
     open suspend fun pushState(state: ControlState) {
+        if (!legacyFallbackEnabled) {
+            error("Legacy transport disabled")
+        }
         legacyTransport?.pushState(state)
     }
 
     @Deprecated("Legacy HTTP control path")
     open suspend fun fetchTelemetry(): Telemetry {
+        if (!legacyFallbackEnabled) {
+            error("Legacy transport disabled")
+        }
         return legacyTransport?.fetchTelemetry()
             ?: throw IllegalStateException("Legacy transport not configured")
     }
@@ -106,10 +120,11 @@ open class TrainRepository(
             scope: kotlinx.coroutines.CoroutineScope,
             httpClient: HttpClient = buildRealtimeHttpClient(HttpClient()),
             clock: Clock = Clock.systemUTC(),
-            legacyTransport: LegacyTrainTransport? = null
+            legacyTransport: LegacyTrainTransport? = null,
+            legacyFallbackEnabled: Boolean = false
         ): TrainRepository {
             val client = CommandChannelClient(endpoint, sessionId, httpClient, scope, clock)
-            return TrainRepository(client, legacyTransport)
+            return TrainRepository(client, legacyTransport, legacyFallbackEnabled)
         }
     }
 }
