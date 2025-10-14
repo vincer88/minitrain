@@ -73,6 +73,8 @@ Les réponses télémétriques réutilisent `session_id` et `seq` pour corréler
 
 1. Installer le SDK [ESP-IDF](https://docs.espressif.com/).
 2. Configurer la toolchain (`idf.py set-target esp32`).
+   *Depuis la révision actuelle, le code vérifie à la compilation que `CONFIG_IDF_TARGET_ESP32` est défini : si une autre cible est
+   sélectionnée, le build échoue explicitement pour éviter de flasher le mauvais SoC.*
 3. Reconfigurer le projet si nécessaire :
    ```bash
    idf.py -C firmware menuconfig

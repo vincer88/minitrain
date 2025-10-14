@@ -6,6 +6,8 @@
 #include <memory>
 #include <string>
 
+#include "minitrain/esp_target_check.hpp"
+
 namespace minitrain {
 
 struct TlsCredentialConfig {
