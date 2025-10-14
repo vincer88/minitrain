@@ -91,11 +91,18 @@ class CommandChannelClientTest {
         val state = MutableStateFlow(ControlState(0.0, Direction.FORWARD, false, false, false))
         val job = client.start(state)
         runCurrent()
-        client.sendCommand(CommandKind.EmergencyStop)
+        val auxiliary = byteArrayOf(0x55, 0x66)
+        client.sendCommand(auxiliary)
 
         advanceTimeBy(200)
         val decoded = session.sentFrames.map { CommandFrameSerializer.decode(it.second) }
-        assertTrue(decoded.any { it.payload.isNotEmpty() && it.payload.first() == CommandKind.EmergencyStop.code })
+        assertTrue(
+            decoded.any {
+                it.payload.size >= 3 &&
+                    it.payload[1] == auxiliary[0] &&
+                    it.payload[2] == auxiliary[1]
+            }
+        )
 
         job.cancelAndJoin()
     }

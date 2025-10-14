@@ -90,7 +90,7 @@ class CommandChannelClient(
 ) {
     private val sequence = AtomicInteger(0)
     private val sessionBytes: ByteArray = uuidToLittleEndian(sessionId)
-    private val queuedCommands = ArrayDeque<CommandFrame>()
+    private val queuedAuxiliaryPayloads = ArrayDeque<ByteArray>()
     private val mutex = Mutex()
     private var job: Job? = null
     private val _telemetry = MutableSharedFlow<Telemetry>(replay = 1, extraBufferCapacity = 16)
@@ -102,22 +102,18 @@ class CommandChannelClient(
         return newJob
     }
 
-    suspend fun sendCommand(kind: CommandKind, payload: ByteArray = byteArrayOf()) {
-        val framePayload = ByteArray(1 + payload.size)
-        framePayload[0] = kind.code
-        payload.copyInto(framePayload, 1)
-        val frame = CommandFrame(
-            buildHeader(sessionBytes, sequence.incrementAndGet(), clock.instant(), CommandPayloadType.Command, framePayload.size),
-            framePayload
-        )
-        mutex.withLock { queuedCommands.addLast(frame) }
+    suspend fun sendCommand(payload: ByteArray) {
+        if (payload.isEmpty()) {
+            return
+        }
+        mutex.withLock { queuedAuxiliaryPayloads.addLast(payload.copyOf()) }
     }
 
     suspend fun stop() {
         mutex.withLock {
             job?.cancel()
             job = null
-            queuedCommands.clear()
+            queuedAuxiliaryPayloads.clear()
         }
     }
 
@@ -148,27 +144,22 @@ class CommandChannelClient(
     }
 
     private suspend fun sendLoop(session: CommandWebSocketSession, stateFlow: StateFlow<ControlState>) {
-        var previousState: ControlState? = null
         var interval = Duration.ofMillis(20)
         while (scope.isActive && session.isOpen) {
             var congested = false
-            while (true) {
-                val pending = mutex.withLock {
-                    if (queuedCommands.isEmpty()) null else queuedCommands.removeFirst()
-                } ?: break
-                if (!session.send(CommandFrameSerializer.encode(pending))) {
-                    congested = true
-                    break
-                }
-            }
-
             val currentState = stateFlow.value
-            val frames = buildStateFrames(sessionBytes, { sequence.incrementAndGet() }, { clock.instant() }, currentState, previousState)
-            previousState = currentState
-            for (frame in frames) {
-                if (!session.send(CommandFrameSerializer.encode(frame))) {
-                    congested = true
-                }
+            val auxiliaryPayload = mutex.withLock {
+                if (queuedAuxiliaryPayloads.isEmpty()) null else queuedAuxiliaryPayloads.removeFirst()
+            }
+            val frame = buildStateFrames(
+                sessionBytes,
+                { sequence.incrementAndGet() },
+                { clock.instant() },
+                currentState,
+                auxiliaryPayload ?: byteArrayOf()
+            )
+            if (!session.send(CommandFrameSerializer.encode(frame))) {
+                congested = true
             }
 
             val targetInterval = if (congested) Duration.ofMillis(100) else Duration.ofMillis(20)
@@ -183,7 +174,7 @@ class CommandChannelClient(
             val payload = session.receive() ?: break
             try {
                 val frame = CommandFrameSerializer.decode(payload)
-                if (frame.header.payloadType == CommandPayloadType.LegacyText) {
+                if (frame.header.lightsOverride.toInt() and 0x80 != 0) {
                     val text = frame.payload.decodeToString()
                     val telemetry = TelemetryParser.parse(text)
                     _telemetry.emit(telemetry)

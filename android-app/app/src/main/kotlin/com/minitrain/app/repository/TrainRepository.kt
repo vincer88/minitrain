@@ -4,7 +4,6 @@ import com.minitrain.app.model.ControlState
 import com.minitrain.app.model.Telemetry
 import com.minitrain.app.model.TrainCommand
 import com.minitrain.app.network.CommandChannelClient
-import com.minitrain.app.network.CommandKind
 import com.minitrain.app.network.buildRealtimeHttpClient
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
@@ -77,8 +76,8 @@ open class TrainRepository(
 ) {
     fun startRealtime(state: StateFlow<ControlState>): Job = realtimeClient.start(state)
 
-    suspend fun sendRealtimeCommand(kind: CommandKind, payload: ByteArray = byteArrayOf()) {
-        realtimeClient.sendCommand(kind, payload)
+    suspend fun sendRealtimeCommand(payload: ByteArray) {
+        realtimeClient.sendCommand(payload)
     }
 
     suspend fun stopRealtime() {
