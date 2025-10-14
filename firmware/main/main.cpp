@@ -1,5 +1,6 @@
 #include <chrono>
 #include <cctype>
+#include <atomic>
 #include <iostream>
 #include <memory>
 #include <sstream>
@@ -8,6 +9,7 @@
 
 #include "minitrain/command_channel.hpp"
 #include "minitrain/command_processor.hpp"
+#include "minitrain/camera_streamer.hpp"
 #include "minitrain/secure_websocket_client.hpp"
 #include "minitrain/pid_controller.hpp"
 #include "minitrain/train_controller.hpp"
@@ -57,6 +59,7 @@ int main() {
     using minitrain::PidController;
     using minitrain::TelemetrySample;
     using minitrain::TrainController;
+    using minitrain::CameraStreamer;
 
     auto motorWriter = [](float command) { std::cout << "Motor PWM command: " << command << '\n'; };
     auto telemetryPublisher = [](const TelemetrySample &sample) {
@@ -133,47 +136,101 @@ int main() {
         }
     }
 
+    CameraStreamer cameraStreamer;
+    std::atomic<bool> cameraStreamingActive{false};
+    auto cameraErrorHandler = [&cameraStreamingActive](const std::string &message) {
+        std::cout << "CAMERA: " << message << '\n';
+        cameraStreamingActive.store(false);
+    };
+
+    auto cameraConfig = CameraStreamer::createDefaultConfig();
+    if (cameraStreamer.initialize(cameraConfig, 33ms, 3, 5, cameraErrorHandler)) {
+        const bool started = cameraStreamer.start();
+        cameraStreamingActive.store(started);
+        if (!started) {
+            std::cout << "WARN: camera capture thread did not start" << '\n';
+        }
+    } else {
+        std::cout << "WARN: camera initialisation failed" << '\n';
+    }
+
     std::cout << "Controller ready. Type commands like 'command=set_speed;value=1.5' or 'command=emergency'" << '\n';
     std::string line;
-    while (std::getline(std::cin, line)) {
-        if (line == "quit") {
+    bool running = true;
+    while (running) {
+        bool processedCommand = false;
+        if (std::cin.good()) {
+            if (std::cin.rdbuf()->in_avail() > 0) {
+                if (!std::getline(std::cin, line)) {
+                    break;
+                }
+                processedCommand = true;
+            }
+        } else {
             break;
         }
-        minitrain::CommandFrame frame;
-        frame.header.payloadType = static_cast<std::uint16_t>(CommandPayloadType::LegacyText);
-        frame.payload.assign(line.begin(), line.end());
-        try {
-            auto result = processor.processFrame(frame, std::chrono::steady_clock::now());
-            std::cout << (result.success ? "OK: " : "ERR: ") << result.message << '\n';
-        } catch (const std::exception &ex) {
-            std::cout << "ERR: " << ex.what() << '\n';
+
+        if (processedCommand) {
+            if (line == "quit") {
+                break;
+            }
+            minitrain::CommandFrame frame;
+            frame.header.payloadType = static_cast<std::uint16_t>(CommandPayloadType::LegacyText);
+            frame.payload.assign(line.begin(), line.end());
+            try {
+                auto result = processor.processFrame(frame, std::chrono::steady_clock::now());
+                std::cout << (result.success ? "OK: " : "ERR: ") << result.message << '\n';
+            } catch (const std::exception &ex) {
+                std::cout << "ERR: " << ex.what() << '\n';
+            }
+
+            controller.onSpeedMeasurement(controller.state().targetSpeed * 0.8F, 100ms);
+            auto currentState = controller.state();
+            TelemetrySample telemetry{};
+            telemetry.speedMetersPerSecond = currentState.targetSpeed;
+            telemetry.motorCurrentAmps = 0.5F;
+            telemetry.batteryVoltage = 11.1F;
+            telemetry.temperatureCelsius = 30.0F;
+            telemetry.failSafeActive = currentState.failSafeActive;
+            telemetry.lightsState = currentState.lightsState;
+            telemetry.lightsSource = currentState.lightsSource;
+            telemetry.activeCab = currentState.activeCab;
+            telemetry.lightsOverrideMask = currentState.lightsOverrideMask;
+            telemetry.lightsTelemetryOnly = currentState.lightsTelemetryOnly;
+            telemetry.commandTimestamp = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                                       std::chrono::steady_clock::now().time_since_epoch())
+                                                       .count());
+            telemetry.sequence = 0;
+            controller.onTelemetrySample(telemetry);
+
+            if (websocket && websocket->isConnected()) {
+                std::ostringstream serializedTelemetry;
+                serializedTelemetry << "speed=" << telemetry.speedMetersPerSecond << ";battery=" << telemetry.batteryVoltage
+                                    << ";temperature=" << telemetry.temperatureCelsius;
+                websocket->sendText(serializedTelemetry.str());
+            }
+        } else {
+            std::this_thread::sleep_for(10ms);
         }
 
-        controller.onSpeedMeasurement(controller.state().targetSpeed * 0.8F, 100ms);
-        auto currentState = controller.state();
-        TelemetrySample telemetry{};
-        telemetry.speedMetersPerSecond = currentState.targetSpeed;
-        telemetry.motorCurrentAmps = 0.5F;
-        telemetry.batteryVoltage = 11.1F;
-        telemetry.temperatureCelsius = 30.0F;
-        telemetry.failSafeActive = currentState.failSafeActive;
-        telemetry.lightsState = currentState.lightsState;
-        telemetry.lightsSource = currentState.lightsSource;
-        telemetry.activeCab = currentState.activeCab;
-        telemetry.lightsOverrideMask = currentState.lightsOverrideMask;
-        telemetry.lightsTelemetryOnly = currentState.lightsTelemetryOnly;
-        telemetry.commandTimestamp = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                                   std::chrono::steady_clock::now().time_since_epoch())
-                                                   .count());
-        telemetry.sequence = 0;
-        controller.onTelemetrySample(telemetry);
-
-        if (websocket && websocket->isConnected()) {
-            std::ostringstream serializedTelemetry;
-            serializedTelemetry << "speed=" << telemetry.speedMetersPerSecond << ";battery=" << telemetry.batteryVoltage
-                                << ";temperature=" << telemetry.temperatureCelsius;
-            websocket->sendText(serializedTelemetry.str());
+        if (cameraStreamer.isRunning()) {
+            auto frame = cameraStreamer.tryAcquireFrame(10ms);
+            while (frame) {
+                if (websocket && websocket->isConnected()) {
+                    websocket->sendBinary(frame->data(), frame->size());
+                } else {
+                    std::cout << "Camera frame captured (" << frame->size() << " bytes)" << '\n';
+                }
+                frame = cameraStreamer.tryAcquireFrame(std::chrono::milliseconds{0});
+            }
+        } else if (cameraStreamingActive.load()) {
+            cameraStreamingActive.store(false);
+            std::cout << "WARN: camera streaming stopped" << '\n';
         }
+    }
+
+    if (cameraStreamer.isRunning()) {
+        cameraStreamer.stop();
     }
 
     return 0;

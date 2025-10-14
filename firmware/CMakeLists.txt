@@ -16,6 +16,7 @@ add_library(minitrain_core
     src/command_channel.cpp
     src/train_controller.cpp
     src/light_controller.cpp
+    src/camera_streamer.cpp
 )
 
 target_include_directories(minitrain_core PUBLIC include)
@@ -25,6 +26,10 @@ target_compile_definitions(minitrain_core PUBLIC
     MINITRAIN_FAILSAFE_THRESHOLD_MS=${MINITRAIN_FAILSAFE_THRESHOLD_MS}
     MINITRAIN_FAILSAFE_RAMP_MS=${MINITRAIN_FAILSAFE_RAMP_MS}
 )
+
+if(ESP_PLATFORM)
+    target_link_libraries(minitrain_core PUBLIC esp_camera esp_timer)
+endif()
 
 add_executable(minitrain_sim
     main/main.cpp

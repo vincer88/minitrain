@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
@@ -37,6 +39,7 @@ class SecureWebSocketClient {
     void close();
     bool isConnected() const;
     bool sendText(const std::string &payload);
+    bool sendBinary(const std::uint8_t *payload, std::size_t length);
 
     const TlsCredentialConfig &config() const { return config_; }
 
