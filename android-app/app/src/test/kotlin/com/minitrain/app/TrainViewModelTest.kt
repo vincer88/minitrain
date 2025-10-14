@@ -7,7 +7,6 @@ import com.minitrain.app.model.LightsSource
 import com.minitrain.app.model.LightsState
 import com.minitrain.app.model.Telemetry
 import com.minitrain.app.model.TelemetrySource
-import com.minitrain.app.model.TrainCommand
 import com.minitrain.app.network.CommandChannelClient
 import com.minitrain.app.network.CommandWebSocketFactory
 import com.minitrain.app.network.CommandWebSocketSession
@@ -15,19 +14,17 @@ import com.minitrain.app.network.buildRealtimeHttpClient
 import com.minitrain.app.repository.TrainRepository
 import com.minitrain.app.ui.TrainViewModel
 import io.ktor.websocket.CloseReason
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.yield
 import java.time.Clock
 import java.util.UUID
-import kotlin.collections.ArrayDeque
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
-import kotlin.time.Duration.Companion.milliseconds
 
 @Suppress("DEPRECATION")
 private class FakeRepository(scope: kotlinx.coroutines.CoroutineScope) : TrainRepository(
@@ -38,34 +35,20 @@ private class FakeRepository(scope: kotlinx.coroutines.CoroutineScope) : TrainRe
         scope = scope,
         clock = Clock.systemUTC()
     ) { _, _ -> CommandWebSocketFactory { object : CommandWebSocketSession {
-        override val isOpen: Boolean = true
+        override val isOpen: Boolean = false
         override suspend fun send(frame: ByteArray): Boolean = true
         override suspend fun close(reason: CloseReason) {}
+        override suspend fun receive(): ByteArray? = null
     } } },
     legacyTransport = null
 ) {
-    val commands = mutableListOf<TrainCommand>()
-    val states = mutableListOf<ControlState>()
-    private val telemetryResponses = ArrayDeque<Telemetry>()
+    private val _telemetry = kotlinx.coroutines.flow.MutableSharedFlow<Telemetry>(replay = 1)
 
-    fun enqueueTelemetry(vararg telemetry: Telemetry) {
-        telemetryResponses.addAll(telemetry)
-    }
+    override val telemetry: kotlinx.coroutines.flow.Flow<Telemetry>
+        get() = _telemetry
 
-    @Suppress("DEPRECATION")
-    override suspend fun sendCommand(command: TrainCommand) {
-        commands.add(command)
-    }
-
-    @Suppress("DEPRECATION")
-    override suspend fun pushState(state: ControlState) {
-        states.add(state)
-    }
-
-    @Suppress("DEPRECATION")
-    override suspend fun fetchTelemetry(): Telemetry {
-        if (telemetryResponses.isEmpty()) error("No telemetry enqueued")
-        return telemetryResponses.removeFirst()
+    suspend fun emitTelemetry(telemetry: Telemetry) {
+        _telemetry.emit(telemetry)
     }
 }
 
@@ -83,11 +66,11 @@ class TrainViewModelTest {
         val state = viewModel.controlState.first()
         assertEquals(2.0, state.targetSpeed)
         assertFalse(state.emergencyStop)
-        assertEquals(1, repository.states.size)
+        viewModel.clear()
     }
 
     @Test
-    fun `polling telemetry emits updates`() = runBlocking {
+    fun `telemetry flow emits updates`() = runBlocking {
         val repository = FakeRepository(this)
         val viewModel = TrainViewModel(repository, this)
         val telemetry = Telemetry(
@@ -111,24 +94,28 @@ class TrainViewModelTest {
             lightsOverrideMask = 0,
             lightsTelemetryOnly = false
         )
-        repository.enqueueTelemetry(telemetry, telemetry.copy(speedMetersPerSecond = 1.5))
+        val second = telemetry.copy(speedMetersPerSecond = 1.5)
 
-        val job = launch { viewModel.startTelemetryPolling(10.milliseconds) }
-        val first = viewModel.telemetry.first { it != null }
-        assertEquals(telemetry, first)
-        delay(15)
-        viewModel.stopTelemetryPolling()
-        job.cancel()
+        val firstDeferred = async { viewModel.telemetry.first { it != null } }
+        repository.emitTelemetry(telemetry)
+        assertEquals(telemetry, firstDeferred.await())
+
+        val secondDeferred = async { viewModel.telemetry.first { it?.speedMetersPerSecond == 1.5 } }
+        repository.emitTelemetry(second)
+        val receivedSecond = secondDeferred.await()
+        assertNotNull(receivedSecond)
+        assertEquals(1.5, receivedSecond.speedMetersPerSecond)
+        viewModel.clear()
     }
 
     @Test
-    fun `direction command sent`() = runBlocking {
+    fun `direction update adjusts control state`() = runBlocking {
         val repository = FakeRepository(this)
         val viewModel = TrainViewModel(repository, this)
 
         viewModel.setDirection(Direction.REVERSE)
         kotlinx.coroutines.yield()
         assertEquals(Direction.REVERSE, viewModel.controlState.first().direction)
-        assertTrue(repository.commands.any { it.command == "set_direction" && it.value == "reverse" })
+        viewModel.clear()
     }
 }

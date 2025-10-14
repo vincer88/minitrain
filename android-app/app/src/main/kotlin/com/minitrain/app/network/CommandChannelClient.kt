@@ -1,6 +1,7 @@
 package com.minitrain.app.network
 
 import com.minitrain.app.model.ControlState
+import com.minitrain.app.model.Telemetry
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
 import io.ktor.client.plugins.websocket.WebSockets
@@ -11,12 +12,18 @@ import io.ktor.http.URLProtocol
 import io.ktor.websocket.CloseReason
 import io.ktor.websocket.Frame
 import io.ktor.websocket.close
+import io.ktor.websocket.readBytes
 import io.ktor.websocket.send
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.channels.receiveCatching
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -31,6 +38,7 @@ interface CommandWebSocketSession {
     val isOpen: Boolean
     suspend fun send(frame: ByteArray): Boolean
     suspend fun close(reason: CloseReason = CloseReason(CloseReason.Codes.NORMAL, ""))
+    suspend fun receive(): ByteArray?
 }
 
 fun interface CommandWebSocketFactory {
@@ -48,6 +56,16 @@ private class KtorCommandWebSocketSession(private val delegate: DefaultClientWeb
 
     override suspend fun close(reason: CloseReason) {
         delegate.close(reason)
+    }
+
+    override suspend fun receive(): ByteArray? {
+        val frame = delegate.incoming.receiveCatching().getOrNull() ?: return null
+        return when (frame) {
+            is Frame.Binary -> frame.data.copyOf()
+            is Frame.Text -> frame.readBytes()
+            is Frame.Close -> null
+            else -> null
+        }
     }
 }
 
@@ -75,6 +93,8 @@ class CommandChannelClient(
     private val queuedCommands = ArrayDeque<CommandFrame>()
     private val mutex = Mutex()
     private var job: Job? = null
+    private val _telemetry = MutableSharedFlow<Telemetry>(replay = 1, extraBufferCapacity = 16)
+    val telemetry: SharedFlow<Telemetry> = _telemetry.asSharedFlow()
 
     fun start(stateFlow: StateFlow<ControlState>): Job {
         val newJob = scope.launch { runLoop(stateFlow) }
@@ -108,7 +128,15 @@ class CommandChannelClient(
             try {
                 val session = factory.open()
                 attempt = 0
-                sendLoop(session, stateFlow)
+                coroutineScope {
+                    val receiver = launch { receiveLoop(session) }
+                    try {
+                        sendLoop(session, stateFlow)
+                    } finally {
+                        receiver.cancel()
+                        receiver.join()
+                    }
+                }
             } catch (ex: CancellationException) {
                 throw ex
             } catch (_: Exception) {
@@ -146,6 +174,23 @@ class CommandChannelClient(
             val targetInterval = if (congested) Duration.ofMillis(100) else Duration.ofMillis(20)
             interval = targetInterval
             delay(interval.toMillis())
+        }
+        session.close()
+    }
+
+    private suspend fun receiveLoop(session: CommandWebSocketSession) {
+        while (scope.isActive && session.isOpen) {
+            val payload = session.receive() ?: break
+            try {
+                val frame = CommandFrameSerializer.decode(payload)
+                if (frame.header.payloadType == CommandPayloadType.LegacyText) {
+                    val text = frame.payload.decodeToString()
+                    val telemetry = TelemetryParser.parse(text)
+                    _telemetry.emit(telemetry)
+                }
+            } catch (_: Exception) {
+                // Ignore malformed frames
+            }
         }
         session.close()
     }
