@@ -21,10 +21,12 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.channels.receiveCatching
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -81,13 +83,25 @@ data class TelemetryFailsafeConfig(
     }
 }
 
-private val FAILSAFE_LIGHTS_MASK: Byte = 0x0C.toByte()
-
 private data class RampState(
     val startInstant: Instant,
     val initialSpeed: Double,
     val direction: Direction
 )
+
+data class FailsafeRampStatus(
+    val isActive: Boolean,
+    val progress: Double,
+    val direction: Direction?
+) {
+    init {
+        require(progress in 0.0..1.0) { "Progress must be between 0.0 and 1.0" }
+    }
+
+    companion object {
+        fun inactive(): FailsafeRampStatus = FailsafeRampStatus(false, 0.0, null)
+    }
+}
 
 class CommandChannelClient(
     private val endpoint: String,
@@ -117,10 +131,13 @@ class CommandChannelClient(
     private val _telemetry = MutableSharedFlow<Telemetry>(replay = 1, extraBufferCapacity = 16)
     val telemetry: SharedFlow<Telemetry> = _telemetry.asSharedFlow()
     @Volatile
-    private var lastTelemetryInstant: Instant? = null
+    private var lastTelemetryCommandTimestampMicros: Long? = null
+    private val _failsafeRampStatus = MutableStateFlow(FailsafeRampStatus.inactive())
+    val failsafeRampStatus: StateFlow<FailsafeRampStatus> = _failsafeRampStatus.asStateFlow()
 
     fun start(stateFlow: StateFlow<ControlState>): Job {
-        lastTelemetryInstant = null
+        lastTelemetryCommandTimestampMicros = null
+        _failsafeRampStatus.value = FailsafeRampStatus.inactive()
         val newJob = scope.launch { runLoop(stateFlow) }
         job = newJob
         return newJob
@@ -170,31 +187,60 @@ class CommandChannelClient(
     private suspend fun sendLoop(session: CommandWebSocketSession, stateFlow: StateFlow<ControlState>) {
         var interval = Duration.ofMillis(20)
         var rampState: RampState? = null
+        var rampCompleted = false
+        var rampActiveLast = false
         while (scope.isActive && session.isOpen) {
             var congested = false
             val currentState = stateFlow.value
             val now = clock.instant()
-            val telemetryInstant = lastTelemetryInstant
+            val telemetryTimestampMicros = lastTelemetryCommandTimestampMicros
+            val telemetryInstant = telemetryTimestampMicros?.let { telemetryTimestampToInstant(it) }
             val stale = telemetryInstant?.let { Duration.between(it, now) > failsafeConfig.staleThreshold } ?: false
             rampState = when {
-                stale && rampState == null -> RampState(now, currentState.targetSpeed, currentState.direction)
-                !stale -> null
+                stale && rampState == null && !rampCompleted && currentState.targetSpeed > 0.0 ->
+                    RampState(now, currentState.targetSpeed, currentState.direction)
+                !stale -> {
+                    rampCompleted = false
+                    null
+                }
                 else -> rampState
             }
             val activeRamp = rampState
-            val effectiveState = if (activeRamp != null) {
+            val rampComputation = if (activeRamp != null) {
                 val elapsed = Duration.between(activeRamp.startInstant, now)
                 val rampDurationNanos = failsafeConfig.rampDuration.toNanos()
                 val elapsedNanos = elapsed.toNanos().coerceAtLeast(0L)
                 val progress = (elapsedNanos.toDouble() / rampDurationNanos.toDouble()).coerceIn(0.0, 1.0)
-                val rampSpeed = (activeRamp.initialSpeed * (1.0 - progress)).coerceAtLeast(0.0)
-                currentState.copy(
-                    targetSpeed = rampSpeed,
-                    direction = if (progress >= 1.0) Direction.NEUTRAL else activeRamp.direction
+                val complete = progress >= 1.0
+                val rampSpeed = if (complete) 0.0 else (activeRamp.initialSpeed * (1.0 - progress)).coerceAtLeast(0.0)
+                val direction = if (complete) Direction.NEUTRAL else activeRamp.direction
+                if (complete) {
+                    rampState = null
+                    rampCompleted = true
+                }
+                Triple(
+                    currentState.copy(
+                        targetSpeed = rampSpeed,
+                        direction = direction
+                    ),
+                    progress,
+                    complete
                 )
             } else {
-                currentState
+                null
             }
+            val effectiveState = rampComputation?.first ?: currentState
+            val rampProgress = rampComputation?.second ?: 0.0
+            val rampActive = rampComputation?.let { !it.third } ?: false
+            val rampDirection = if (rampActive) activeRamp?.direction else null
+            if (rampActive != rampActiveLast || (rampActive && _failsafeRampStatus.value.progress != rampProgress)) {
+                _failsafeRampStatus.value = if (rampActive) {
+                    FailsafeRampStatus(true, rampProgress, rampDirection)
+                } else {
+                    FailsafeRampStatus.inactive()
+                }
+            }
+            rampActiveLast = rampActive
             val auxiliaryPayload = mutex.withLock {
                 if (queuedAuxiliaryPayloads.isEmpty()) null else queuedAuxiliaryPayloads.removeFirst()
             }
@@ -204,7 +250,7 @@ class CommandChannelClient(
                 { clock.instant() },
                 effectiveState,
                 auxiliaryPayload ?: byteArrayOf(),
-                lightsOverride = if (activeRamp != null) FAILSAFE_LIGHTS_MASK else null
+                lightsOverride = null
             )
             if (!session.send(CommandFrameSerializer.encode(frame))) {
                 congested = true
@@ -225,7 +271,10 @@ class CommandChannelClient(
                 if (frame.header.lightsOverride.toInt() and 0x80 != 0) {
                     val text = frame.payload.decodeToString()
                     val telemetry = TelemetryParser.parse(text)
-                    lastTelemetryInstant = telemetryTimestampToInstant(telemetry.commandTimestamp)
+                    lastTelemetryCommandTimestampMicros = telemetry.commandTimestamp
+                    if (_failsafeRampStatus.value.isActive) {
+                        _failsafeRampStatus.value = FailsafeRampStatus.inactive()
+                    }
                     _telemetry.emit(telemetry)
                 }
             } catch (_: Exception) {

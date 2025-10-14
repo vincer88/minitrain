@@ -4,6 +4,7 @@ import com.minitrain.app.model.ControlState
 import com.minitrain.app.model.Telemetry
 import com.minitrain.app.model.TrainCommand
 import com.minitrain.app.network.CommandChannelClient
+import com.minitrain.app.network.FailsafeRampStatus
 import com.minitrain.app.network.TelemetryFailsafeConfig
 import com.minitrain.app.network.buildRealtimeHttpClient
 import io.ktor.client.HttpClient
@@ -87,6 +88,9 @@ open class TrainRepository(
 
     open val telemetry: Flow<Telemetry>
         get() = realtimeClient.telemetry
+
+    open val failsafeRampStatus: StateFlow<FailsafeRampStatus>
+        get() = realtimeClient.failsafeRampStatus
 
     @Deprecated("Legacy HTTP control path")
     open suspend fun sendCommand(command: TrainCommand) {

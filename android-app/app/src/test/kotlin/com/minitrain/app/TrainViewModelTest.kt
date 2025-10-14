@@ -10,12 +10,14 @@ import com.minitrain.app.model.TelemetrySource
 import com.minitrain.app.network.CommandChannelClient
 import com.minitrain.app.network.CommandWebSocketFactory
 import com.minitrain.app.network.CommandWebSocketSession
+import com.minitrain.app.network.FailsafeRampStatus
 import com.minitrain.app.network.buildRealtimeHttpClient
 import com.minitrain.app.repository.TrainRepository
 import com.minitrain.app.ui.TrainViewModel
 import io.ktor.websocket.CloseReason
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.yield
 import java.time.Clock
@@ -43,12 +45,20 @@ private class FakeRepository(scope: kotlinx.coroutines.CoroutineScope) : TrainRe
     legacyTransport = null
 ) {
     private val _telemetry = kotlinx.coroutines.flow.MutableSharedFlow<Telemetry>(replay = 1)
+    private val _failsafe = MutableStateFlow(FailsafeRampStatus.inactive())
 
     override val telemetry: kotlinx.coroutines.flow.Flow<Telemetry>
         get() = _telemetry
 
+    override val failsafeRampStatus: kotlinx.coroutines.flow.StateFlow<FailsafeRampStatus>
+        get() = _failsafe
+
     suspend fun emitTelemetry(telemetry: Telemetry) {
         _telemetry.emit(telemetry)
+    }
+
+    fun emitFailsafe(status: FailsafeRampStatus) {
+        _failsafe.value = status
     }
 }
 
@@ -116,6 +126,52 @@ class TrainViewModelTest {
         viewModel.setDirection(Direction.REVERSE)
         kotlinx.coroutines.yield()
         assertEquals(Direction.REVERSE, viewModel.controlState.first().direction)
+        viewModel.clear()
+    }
+
+    @Test
+    fun `failsafe ramp inhibits control inputs`() = runBlocking {
+        val repository = FakeRepository(this)
+        val viewModel = TrainViewModel(repository, this)
+
+        repository.emitFailsafe(FailsafeRampStatus(true, 0.2, Direction.FORWARD))
+        yield()
+
+        viewModel.setTargetSpeed(3.0)
+        viewModel.setDirection(Direction.REVERSE)
+        yield()
+
+        val duringRamp = viewModel.controlState.first()
+        assertEquals(0.0, duringRamp.targetSpeed)
+        assertEquals(Direction.FORWARD, duringRamp.direction)
+
+        repository.emitFailsafe(FailsafeRampStatus.inactive())
+        yield()
+
+        viewModel.setTargetSpeed(3.0)
+        yield()
+
+        val afterRamp = viewModel.controlState.first()
+        assertEquals(3.0, afterRamp.targetSpeed)
+        viewModel.clear()
+    }
+
+    @Test
+    fun `direction resets to neutral after ramp completion`() = runBlocking {
+        val repository = FakeRepository(this)
+        val viewModel = TrainViewModel(repository, this)
+
+        viewModel.setDirection(Direction.REVERSE)
+        yield()
+        assertEquals(Direction.REVERSE, viewModel.controlState.first().direction)
+
+        repository.emitFailsafe(FailsafeRampStatus(true, 0.5, Direction.REVERSE))
+        yield()
+        repository.emitFailsafe(FailsafeRampStatus.inactive())
+        yield()
+
+        val finalState = viewModel.controlState.first()
+        assertEquals(Direction.NEUTRAL, finalState.direction)
         viewModel.clear()
     }
 }
