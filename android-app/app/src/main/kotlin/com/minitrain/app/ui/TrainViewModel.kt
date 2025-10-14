@@ -4,6 +4,8 @@ import com.minitrain.app.model.ControlState
 import com.minitrain.app.model.Direction
 import com.minitrain.app.model.Telemetry
 import com.minitrain.app.network.FailsafeRampStatus
+import androidx.media3.common.Player
+import com.minitrain.app.network.VideoStreamState
 import com.minitrain.app.repository.TrainRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -38,6 +40,10 @@ class TrainViewModel(
     private val realtimeJob: Job
     private val telemetryJob: Job
     private val failsafeJob: Job
+    private val videoJob: Job
+
+    private val _videoStreamState = MutableStateFlow(VideoStreamUiState(VideoStreamState.Idle, false, null))
+    val videoStreamState: StateFlow<VideoStreamUiState> = _videoStreamState.asStateFlow()
 
     init {
         realtimeJob = repository.startRealtime(controlState)
@@ -61,6 +67,15 @@ class TrainViewModel(
                         }
                     }
                 }
+            }
+        }
+        videoJob = scope.launch {
+            repository.videoStreamState.collect { state ->
+                _videoStreamState.value = VideoStreamUiState(
+                    state = state,
+                    isBuffering = state is VideoStreamState.Buffering,
+                    errorMessage = (state as? VideoStreamState.Error)?.message
+                )
             }
         }
     }
@@ -95,6 +110,29 @@ class TrainViewModel(
         realtimeJob.cancel()
         telemetryJob.cancel()
         failsafeJob.cancel()
-        scope.launch { repository.stopRealtime() }
+        videoJob.cancel()
+        scope.launch {
+            repository.stopRealtime()
+            repository.stopVideoStream()
+            repository.releaseVideoStream()
+        }
     }
+
+    fun startVideoStream(url: String) {
+        _videoStreamState.value = VideoStreamUiState(VideoStreamState.Buffering, true, null)
+        repository.startVideoStream(url)
+    }
+
+    fun stopVideoStream() {
+        repository.stopVideoStream()
+        _videoStreamState.value = VideoStreamUiState(VideoStreamState.Idle, false, null)
+    }
+
+    fun videoPlayer(): Player? = repository.videoPlayer
 }
+
+data class VideoStreamUiState(
+    val state: VideoStreamState,
+    val isBuffering: Boolean,
+    val errorMessage: String?
+)
