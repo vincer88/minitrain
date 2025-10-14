@@ -1,25 +1,25 @@
 package com.minitrain.app.network
 
+import com.minitrain.app.model.ControlState
 import com.minitrain.app.model.Direction
+import java.time.Instant
 import kotlin.test.Test
-import kotlin.test.assertContentEquals
+import kotlin.test.assertEquals
 
 class CommandFramesTest {
     @Test
-    fun `buildDirectionPayload encodes neutral`() {
-        val payload = buildDirectionPayload(Direction.NEUTRAL)
-        assertContentEquals(byteArrayOf(CommandKind.SetDirection.code, 0), payload)
-    }
-
-    @Test
-    fun `buildDirectionPayload encodes forward`() {
-        val payload = buildDirectionPayload(Direction.FORWARD)
-        assertContentEquals(byteArrayOf(CommandKind.SetDirection.code, 1), payload)
-    }
-
-    @Test
-    fun `buildDirectionPayload encodes reverse`() {
-        val payload = buildDirectionPayload(Direction.REVERSE)
-        assertContentEquals(byteArrayOf(CommandKind.SetDirection.code, 2), payload)
+    fun `serializer roundtrips direction`() {
+        val session = ByteArray(16)
+        Direction.entries.forEachIndexed { index, direction ->
+            val frame = buildStateFrames(
+                session,
+                { index + 1 },
+                { Instant.ofEpochSecond(index.toLong()) },
+                ControlState(0.5, direction, false, false, false),
+                byteArrayOf()
+            )
+            val decoded = CommandFrameSerializer.decode(CommandFrameSerializer.encode(frame))
+            assertEquals(direction, decoded.header.direction)
+        }
     }
 }

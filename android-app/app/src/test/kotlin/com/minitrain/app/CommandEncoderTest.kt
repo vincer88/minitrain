@@ -3,11 +3,8 @@ package com.minitrain.app
 import com.minitrain.app.model.ControlState
 import com.minitrain.app.model.Direction
 import com.minitrain.app.network.CommandFrameSerializer
-import com.minitrain.app.network.CommandKind
-import com.minitrain.app.network.CommandPayloadType
 import com.minitrain.app.network.buildStateFrames
 import com.minitrain.app.network.buildHeader
-import com.minitrain.app.network.buildTogglePayload
 import com.minitrain.app.network.uuidToLittleEndian
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -31,39 +28,61 @@ class CommandEncoderTest {
     }
 
     @Test
-    fun `state frames include speed and toggles`() {
+    fun `state frame encodes aggregated state`() {
         val session = ByteArray(16) { it.toByte() }
         var sequence = 0
         val now = Instant.parse("2024-01-01T00:00:00Z")
-        val frames = buildStateFrames(
+        val frame = buildStateFrames(
             session,
             { ++sequence },
             { now },
-            ControlState(2.5, Direction.REVERSE, true, false, false),
-            ControlState(1.0, Direction.FORWARD, false, false, false)
+            ControlState(2.5, Direction.REVERSE, true, true, true),
+            byteArrayOf()
         )
-        assertTrue(frames.size >= 3)
-        val speedFrame = frames.first()
-        assertEquals(CommandPayloadType.Command, speedFrame.header.payloadType)
-        val decoded = CommandFrameSerializer.decode(CommandFrameSerializer.encode(speedFrame))
-        assertEquals(speedFrame.header.payloadSize, decoded.header.payloadSize)
-        val payload = decoded.payload
-        assertEquals(CommandKind.SetSpeed.code, payload.first())
+        val encoded = CommandFrameSerializer.encode(frame)
+        val decoded = CommandFrameSerializer.decode(encoded)
+        assertEquals(1, decoded.header.sequence)
+        assertEquals(2.5f, decoded.header.targetSpeedMetersPerSecond)
+        assertEquals(Direction.REVERSE, decoded.header.direction)
+        assertEquals(0x03.toByte(), decoded.header.lightsOverride)
+        assertTrue(decoded.payload.isNotEmpty())
+        val flags = decoded.payload.first().toInt()
+        assertEquals(0x07, flags)
     }
 
     @Test
-    fun `toggle payload encodes boolean`() {
-        val payload = buildTogglePayload(CommandKind.ToggleHeadlights, true)
-        assertContentEquals(byteArrayOf(CommandKind.ToggleHeadlights.code, 1), payload)
+    fun `auxiliary payload is appended after control flags`() {
+        val session = ByteArray(16) { it.toByte() }
+        val payload = byteArrayOf(0x10, 0x20)
+        val frame = buildStateFrames(
+            session,
+            { 42 },
+            { Instant.parse("2024-01-01T00:00:00Z") },
+            ControlState(1.0, Direction.FORWARD, false, false, false),
+            payload
+        )
+        assertEquals(payload.size + 1, frame.payload.size)
+        assertEquals(0x00, frame.payload.first().toInt())
+        assertContentEquals(payload, frame.payload.copyOfRange(1, frame.payload.size))
     }
 
     @Test
     fun `header builder preserves fields`() {
         val session = ByteArray(16)
-        val header = buildHeader(session, 5, Instant.ofEpochSecond(10, 5), CommandPayloadType.Command, 3)
+        val header = buildHeader(
+            session,
+            5,
+            Instant.ofEpochSecond(10, 5_000),
+            3.5,
+            Direction.FORWARD,
+            0x01,
+            4
+        )
         assertEquals(5, header.sequence)
-        assertEquals(CommandPayloadType.Command, header.payloadType)
-        assertEquals(3, header.payloadSize)
-        assertEquals(10_000_000_005L, header.timestampNanoseconds)
+        assertEquals(3.5f, header.targetSpeedMetersPerSecond)
+        assertEquals(Direction.FORWARD, header.direction)
+        assertEquals(0x01.toByte(), header.lightsOverride)
+        assertEquals(4, header.auxiliaryPayloadSize)
+        assertEquals(10_000_005L, header.timestampMicros)
     }
 }
