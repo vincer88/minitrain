@@ -1,5 +1,6 @@
 #include "minitrain/secure_websocket_client.hpp"
 
+#include <cstdint>
 #include <mutex>
 #include <stdexcept>
 #include <utility>
@@ -185,6 +186,24 @@ bool SecureWebSocketClient::sendText(const std::string &payload) {
     if (impl_->messageHandler) {
         impl_->messageHandler(payload);
     }
+    return true;
+#endif
+}
+
+bool SecureWebSocketClient::sendBinary(const std::uint8_t *payload, std::size_t length) {
+#ifdef ESP_PLATFORM
+    if (!impl_ || !impl_->client || !esp_websocket_client_is_connected(impl_->client)) {
+        return false;
+    }
+    const int result =
+        esp_websocket_client_send_bin(impl_->client, reinterpret_cast<const char *>(payload), static_cast<int>(length), 10000);
+    return result >= 0;
+#else
+    if (!impl_->connected) {
+        return false;
+    }
+    (void)payload;
+    (void)length;
     return true;
 #endif
 }
