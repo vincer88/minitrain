@@ -35,7 +35,7 @@ Les réponses télémétriques réutilisent `session_id` et `seq` pour corréler
 
 - **Chiffrement & authentification** : toutes les connexions sont chiffrées (TLS 1.3 minimum). L’authentification mutuelle est réalisée via certificats clients pour la cabine et via OAuth2 mTLS pour les applications mobiles. Les jetons expirent après 12 heures et doivent être renégociés hors bande.
 - **Détection de perte** : un seuil unique (par défaut 150 ms) est configurable côté firmware et côté client. Lorsque l’écart entre le `timestamp` le plus récent et l’horloge locale dépasse ce seuil, une rampe d’arrêt progressive est déclenchée.
-- **Rampe d’arrêt** : la durée de la rampe est configurable (1000 ms par défaut). Pendant la rampe, `target_speed` est décrémentée linéairement jusqu’à 0 avec maintien de la dernière direction connue, puis la direction repasse à neutre. Les feux sont forcés à l’état sécurité (rouges bilatéraux) tant que la rampe est active.
+- **Rampe d’arrêt** : la durée de la rampe est configurable (1000 ms par défaut). Pendant la rampe, `target_speed` est décrémentée linéairement jusqu’à 0 avec maintien de la dernière direction connue, puis la direction repasse à neutre. Seule la vitesse moteur est ramenée à zéro tandis que la logique d’éclairage automatique continue de s’appliquer.
 
 ### 2.3 Logique d’éclairage et télémétrie
 
