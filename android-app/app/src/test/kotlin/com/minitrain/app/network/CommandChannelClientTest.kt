@@ -21,6 +21,7 @@ import java.time.ZoneOffset
 import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -165,7 +166,7 @@ class CommandChannelClientTest {
     }
 
     @Test
-    fun `stale telemetry activates failsafe lights`() = runTest(StandardTestDispatcher()) {
+    fun `stale telemetry activates failsafe ramp`() = runTest(StandardTestDispatcher()) {
         val session = FakeSession(this)
         val client = CommandChannelClient(
             endpoint = "wss://example/ws",
@@ -188,13 +189,14 @@ class CommandChannelClientTest {
 
         advanceTimeBy(40)
         runCurrent()
-        val beforeStale = CommandFrameSerializer.decode(session.sentFrames.last().second)
-        assertEquals(0x00.toByte(), beforeStale.header.lightsOverride)
+        assertFalse(client.failsafeRampStatus.value.isActive)
 
         advanceTimeBy(20)
         runCurrent()
         val afterStale = CommandFrameSerializer.decode(session.sentFrames.last().second)
-        assertEquals(0x0C.toByte(), afterStale.header.lightsOverride)
+        assertTrue(client.failsafeRampStatus.value.isActive)
+        assertEquals(Direction.FORWARD, afterStale.header.direction)
+        assertEquals(0x00.toByte(), afterStale.header.lightsOverride)
 
         job.cancelAndJoin()
     }
@@ -230,16 +232,53 @@ class CommandChannelClientTest {
         runCurrent()
         val midFrame = CommandFrameSerializer.decode(session.sentFrames.last().second)
         val midSpeed = midFrame.header.targetSpeedMetersPerSecond.toDouble()
+        val rampStatus = client.failsafeRampStatus.value
 
         advanceTimeBy(200)
         runCurrent()
         val finalFrame = CommandFrameSerializer.decode(session.sentFrames.last().second)
         val finalSpeed = finalFrame.header.targetSpeedMetersPerSecond.toDouble()
+        val finalStatus = client.failsafeRampStatus.value
 
         assertTrue(midSpeed < startSpeed)
         assertTrue(finalSpeed <= 0.01)
         assertEquals(Direction.NEUTRAL, finalFrame.header.direction)
-        assertEquals(0x0C.toByte(), finalFrame.header.lightsOverride)
+        assertTrue(rampStatus.isActive)
+        assertTrue(rampStatus.progress in 0.0..1.0)
+        assertFalse(finalStatus.isActive)
+
+        job.cancelAndJoin()
+    }
+
+    @Test
+    fun `fresh telemetry clears failsafe ramp`() = runTest(StandardTestDispatcher()) {
+        val session = FakeSession(this)
+        val client = CommandChannelClient(
+            endpoint = "wss://example/ws",
+            sessionId = UUID.randomUUID(),
+            client = buildRealtimeHttpClient(),
+            scope = this,
+            clock = testClock(this),
+            failsafeConfig = TelemetryFailsafeConfig(
+                staleThreshold = Duration.ofMillis(30),
+                rampDuration = Duration.ofMillis(200)
+            )
+        ) { _, _ -> CommandWebSocketFactory { session } }
+
+        val state = MutableStateFlow(ControlState(2.0, Direction.FORWARD, false, false, false))
+        val job = client.start(state)
+        runCurrent()
+
+        session.enqueueIncoming(telemetryFrame(0))
+        runCurrent()
+
+        advanceTimeBy(40)
+        runCurrent()
+        assertTrue(client.failsafeRampStatus.value.isActive)
+
+        session.enqueueIncoming(telemetryFrame(40_000))
+        runCurrent()
+        assertFalse(client.failsafeRampStatus.value.isActive)
 
         job.cancelAndJoin()
     }

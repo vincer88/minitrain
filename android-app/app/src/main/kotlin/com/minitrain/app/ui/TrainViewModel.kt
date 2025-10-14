@@ -3,6 +3,7 @@ package com.minitrain.app.ui
 import com.minitrain.app.model.ControlState
 import com.minitrain.app.model.Direction
 import com.minitrain.app.model.Telemetry
+import com.minitrain.app.network.FailsafeRampStatus
 import com.minitrain.app.repository.TrainRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -10,8 +11,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 
 class TrainViewModel(
     private val repository: TrainRepository,
@@ -30,9 +32,12 @@ class TrainViewModel(
         )
     )
     val controlState: StateFlow<ControlState> = _controlState.asStateFlow()
+    private val _failsafeRampStatus = MutableStateFlow(FailsafeRampStatus.inactive())
+    val failsafeRampStatus: StateFlow<FailsafeRampStatus> = _failsafeRampStatus.asStateFlow()
 
     private val realtimeJob: Job
     private val telemetryJob: Job
+    private val failsafeJob: Job
 
     init {
         realtimeJob = repository.startRealtime(controlState)
@@ -41,32 +46,55 @@ class TrainViewModel(
                 _telemetry.value = telemetry
             }
         }
+        failsafeJob = scope.launch {
+            var wasActive = false
+            repository.failsafeRampStatus.collect { status ->
+                val previouslyActive = wasActive
+                wasActive = status.isActive
+                _failsafeRampStatus.value = status
+                if (previouslyActive && !status.isActive) {
+                    _controlState.update {
+                        if (it.direction == Direction.NEUTRAL) {
+                            it
+                        } else {
+                            it.copy(direction = Direction.NEUTRAL)
+                        }
+                    }
+                }
+            }
+        }
     }
 
     fun setTargetSpeed(speed: Double) {
+        if (_failsafeRampStatus.value.isActive) return
         val sanitized = speed.coerceIn(0.0, 5.0)
         _controlState.value = _controlState.value.copy(targetSpeed = sanitized, emergencyStop = false)
     }
 
     fun toggleHeadlights(enabled: Boolean) {
+        if (_failsafeRampStatus.value.isActive) return
         _controlState.value = _controlState.value.copy(headlights = enabled)
     }
 
     fun toggleHorn(enabled: Boolean) {
+        if (_failsafeRampStatus.value.isActive) return
         _controlState.value = _controlState.value.copy(horn = enabled)
     }
 
     fun setDirection(direction: Direction) {
+        if (_failsafeRampStatus.value.isActive) return
         _controlState.value = _controlState.value.copy(direction = direction)
     }
 
     fun emergencyStop() {
+        if (_failsafeRampStatus.value.isActive) return
         _controlState.value = _controlState.value.copy(targetSpeed = 0.0, emergencyStop = true)
     }
 
     fun clear() {
         realtimeJob.cancel()
         telemetryJob.cancel()
+        failsafeJob.cancel()
         scope.launch { repository.stopRealtime() }
     }
 }
