@@ -4,6 +4,7 @@ import com.minitrain.app.model.ControlState
 import com.minitrain.app.model.Telemetry
 import com.minitrain.app.model.TrainCommand
 import com.minitrain.app.network.CommandChannelClient
+import com.minitrain.app.network.TelemetryFailsafeConfig
 import com.minitrain.app.network.buildRealtimeHttpClient
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
@@ -119,10 +120,11 @@ open class TrainRepository(
             scope: kotlinx.coroutines.CoroutineScope,
             httpClient: HttpClient = buildRealtimeHttpClient(HttpClient()),
             clock: Clock = Clock.systemUTC(),
+            failsafeConfig: TelemetryFailsafeConfig = TelemetryFailsafeConfig(),
             legacyTransport: LegacyTrainTransport? = null,
             legacyFallbackEnabled: Boolean = false
         ): TrainRepository {
-            val client = CommandChannelClient(endpoint, sessionId, httpClient, scope, clock)
+            val client = CommandChannelClient(endpoint, sessionId, httpClient, scope, clock, failsafeConfig)
             return TrainRepository(client, legacyTransport, legacyFallbackEnabled)
         }
     }
