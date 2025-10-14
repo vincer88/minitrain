@@ -128,7 +128,8 @@ fun buildStateFrames(
     sequenceSupplier: () -> Int,
     timestampProvider: () -> Instant,
     state: ControlState,
-    auxiliaryPayload: ByteArray = byteArrayOf()
+    auxiliaryPayload: ByteArray = byteArrayOf(),
+    lightsOverride: Byte? = null
 ): CommandFrame {
     val timestamp = timestampProvider()
     val sequence = sequenceSupplier()
@@ -138,14 +139,14 @@ fun buildStateFrames(
     if (auxiliaryPayload.isNotEmpty()) {
         auxiliaryPayload.copyInto(payload, destinationOffset = 1)
     }
-    val lightsOverride = if (state.headlights) 0x03.toByte() else 0x00
+    val computedLightsOverride = lightsOverride ?: if (state.headlights) 0x03.toByte() else 0x00
     val header = buildHeader(
         sessionId = sessionId,
         sequence = sequence,
         timestamp = timestamp,
         targetSpeed = state.targetSpeed,
         direction = state.direction,
-        lightsOverride = lightsOverride,
+        lightsOverride = computedLightsOverride,
         payloadSize = payload.size
     )
     return CommandFrame(header, payload)

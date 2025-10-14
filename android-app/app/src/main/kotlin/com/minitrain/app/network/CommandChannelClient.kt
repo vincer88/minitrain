@@ -1,6 +1,7 @@
 package com.minitrain.app.network
 
 import com.minitrain.app.model.ControlState
+import com.minitrain.app.model.Direction
 import com.minitrain.app.model.Telemetry
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
@@ -30,6 +31,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.time.Clock
 import java.time.Duration
+import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.collections.ArrayDeque
@@ -69,12 +71,31 @@ private class KtorCommandWebSocketSession(private val delegate: DefaultClientWeb
     }
 }
 
+data class TelemetryFailsafeConfig(
+    val staleThreshold: Duration = Duration.ofMillis(150),
+    val rampDuration: Duration = Duration.ofMillis(1000)
+) {
+    init {
+        require(staleThreshold > Duration.ZERO) { "Stale threshold must be positive" }
+        require(rampDuration > Duration.ZERO) { "Ramp duration must be positive" }
+    }
+}
+
+private val FAILSAFE_LIGHTS_MASK: Byte = 0x0C.toByte()
+
+private data class RampState(
+    val startInstant: Instant,
+    val initialSpeed: Double,
+    val direction: Direction
+)
+
 class CommandChannelClient(
     private val endpoint: String,
     private val sessionId: UUID,
     private val client: HttpClient,
     private val scope: CoroutineScope,
     private val clock: Clock = Clock.systemUTC(),
+    private val failsafeConfig: TelemetryFailsafeConfig = TelemetryFailsafeConfig(),
     private val factoryProvider: (HttpClient, String) -> CommandWebSocketFactory = { httpClient, url ->
         CommandWebSocketFactory {
             val builder = URLBuilder(url)
@@ -95,8 +116,11 @@ class CommandChannelClient(
     private var job: Job? = null
     private val _telemetry = MutableSharedFlow<Telemetry>(replay = 1, extraBufferCapacity = 16)
     val telemetry: SharedFlow<Telemetry> = _telemetry.asSharedFlow()
+    @Volatile
+    private var lastTelemetryInstant: Instant? = null
 
     fun start(stateFlow: StateFlow<ControlState>): Job {
+        lastTelemetryInstant = null
         val newJob = scope.launch { runLoop(stateFlow) }
         job = newJob
         return newJob
@@ -145,9 +169,32 @@ class CommandChannelClient(
 
     private suspend fun sendLoop(session: CommandWebSocketSession, stateFlow: StateFlow<ControlState>) {
         var interval = Duration.ofMillis(20)
+        var rampState: RampState? = null
         while (scope.isActive && session.isOpen) {
             var congested = false
             val currentState = stateFlow.value
+            val now = clock.instant()
+            val telemetryInstant = lastTelemetryInstant
+            val stale = telemetryInstant?.let { Duration.between(it, now) > failsafeConfig.staleThreshold } ?: false
+            rampState = when {
+                stale && rampState == null -> RampState(now, currentState.targetSpeed, currentState.direction)
+                !stale -> null
+                else -> rampState
+            }
+            val activeRamp = rampState
+            val effectiveState = if (activeRamp != null) {
+                val elapsed = Duration.between(activeRamp.startInstant, now)
+                val rampDurationNanos = failsafeConfig.rampDuration.toNanos()
+                val elapsedNanos = elapsed.toNanos().coerceAtLeast(0L)
+                val progress = (elapsedNanos.toDouble() / rampDurationNanos.toDouble()).coerceIn(0.0, 1.0)
+                val rampSpeed = (activeRamp.initialSpeed * (1.0 - progress)).coerceAtLeast(0.0)
+                currentState.copy(
+                    targetSpeed = rampSpeed,
+                    direction = if (progress >= 1.0) Direction.NEUTRAL else activeRamp.direction
+                )
+            } else {
+                currentState
+            }
             val auxiliaryPayload = mutex.withLock {
                 if (queuedAuxiliaryPayloads.isEmpty()) null else queuedAuxiliaryPayloads.removeFirst()
             }
@@ -155,8 +202,9 @@ class CommandChannelClient(
                 sessionBytes,
                 { sequence.incrementAndGet() },
                 { clock.instant() },
-                currentState,
-                auxiliaryPayload ?: byteArrayOf()
+                effectiveState,
+                auxiliaryPayload ?: byteArrayOf(),
+                lightsOverride = if (activeRamp != null) FAILSAFE_LIGHTS_MASK else null
             )
             if (!session.send(CommandFrameSerializer.encode(frame))) {
                 congested = true
@@ -177,6 +225,7 @@ class CommandChannelClient(
                 if (frame.header.lightsOverride.toInt() and 0x80 != 0) {
                     val text = frame.payload.decodeToString()
                     val telemetry = TelemetryParser.parse(text)
+                    lastTelemetryInstant = telemetryTimestampToInstant(telemetry.commandTimestamp)
                     _telemetry.emit(telemetry)
                 }
             } catch (_: Exception) {
@@ -189,4 +238,11 @@ class CommandChannelClient(
 
 fun buildRealtimeHttpClient(base: HttpClient = HttpClient()): HttpClient = base.config {
     install(WebSockets)
+}
+
+private fun telemetryTimestampToInstant(timestampMicros: Long): Instant {
+    val seconds = Math.floorDiv(timestampMicros, 1_000_000L)
+    val micros = Math.floorMod(timestampMicros, 1_000_000L)
+    val nanos = micros * 1_000L
+    return Instant.ofEpochSecond(seconds, nanos)
 }
