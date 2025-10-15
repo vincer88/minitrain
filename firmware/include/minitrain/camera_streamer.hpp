@@ -11,6 +11,8 @@
 #include <string>
 #include <thread>
 
+#include "minitrain/esp_target_check.hpp"
+
 #ifdef ESP_PLATFORM
 #include "esp_camera.h"
 #include "esp_err.h"
