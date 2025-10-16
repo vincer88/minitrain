@@ -44,6 +44,12 @@ gradle :app:connectedComposeDebugAndroidTest # tests UI Compose de la vue cabine
 
 > **Prérequis UI** : fournir un endpoint vidéo de test (ESP32 ou mock HLS/RTSP) accessible localement et référencé dans `local.properties` (`cab.video.previewUrl=`) pour que les tests de la vue cabine valident les états « flux disponible/perdu ».
 
+Les nouveaux tests Compose instrumentés (`TrainControlScreenTest`) pilotent la glissière de vitesse, les boutons de direction et la sélection de cabine, tout en vérifiant les interactions avec `TrainViewModel`. Ils capturent également les overlays vidéo (buffering/erreur) et génèrent des captures d'écran enregistrées sur l'appareil sous `Android/data/com.minitrain/files/reports/screenshots`. Après exécution, rapatriez-les localement dans `android-app/app/build/reports/screenshots/` avec :
+
+```bash
+adb pull /sdcard/Android/data/com.minitrain/files/reports/screenshots android-app/app/build/reports/screenshots/
+```
+
 ## Configuration des visuels cabine et flux vidéo
 
 Les visuels de cabine sont stockés dans `android-app/app/src/main/res/drawable/cab/` et `android-app/app/src/main/res/raw/overlays/`. Pour chaque rame, associez un identifiant de ressource dans `android-app/app/src/main/assets/cabs.json` :

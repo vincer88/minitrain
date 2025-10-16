@@ -143,7 +143,13 @@ cd android-app
    ./gradlew :app:connectedComposeDebugAndroidTest
    ```
    - `connectedAndroidTest` valide la pile réseau TLS/mTLS et la logique de ViewModel.
-   - `connectedComposeDebugAndroidTest` couvre la nouvelle vue cabine (sélecteurs, manipulateur, transitions retour).
+   - `connectedComposeDebugAndroidTest` exécute désormais `TrainControlScreenTest`, qui simule la glissière de vitesse, les puces de direction et le choix de cabine tout en vérifiant les appels `TrainViewModel`. Le test force également les états `Buffering` / `Error` du flux vidéo, affiche l’overlay cabine et déclenche les actions de relance.
+
+   Les captures d’écran générées pendant `TrainControlScreenTest` sont enregistrées sur l’appareil dans `Android/data/com.minitrain/files/reports/screenshots`. Pour les inclure dans une revue ou un artefact CI, rapatriez-les vers `android-app/app/build/reports/screenshots/` :
+
+   ```bash
+   adb pull /sdcard/Android/data/com.minitrain/files/reports/screenshots android-app/app/build/reports/screenshots/
+   ```
 
 > **Pré-requis** : définissez `cab.video.previewUrl` dans `android-app/local.properties` pour qu'un flux vidéo (ESP32 ou mock `scripts/mock_video_server.py`) soit accessible pendant les tests Compose. Sans flux, les assertions de statut « Flux disponible » échoueront.
 
