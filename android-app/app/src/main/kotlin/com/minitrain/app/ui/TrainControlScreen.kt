@@ -1,6 +1,7 @@
 package com.minitrain.app.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -44,9 +45,11 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.viewinterop.AndroidView
+import com.minitrain.app.R
 import com.minitrain.app.model.ActiveCab
 import com.minitrain.app.model.Direction
 import com.minitrain.app.network.VideoStreamState
@@ -226,8 +229,13 @@ private fun CabinOverlay(modifier: Modifier = Modifier) {
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            Image(
+                painter = painterResource(R.drawable.cabine_default),
+                contentDescription = "Illustration de la cabine du train",
+                modifier = Modifier.fillMaxWidth(0.3f)
+            )
             Text(
                 text = "Cabine", // fallback label when no image is available
                 style = MaterialTheme.typography.titleMedium,
