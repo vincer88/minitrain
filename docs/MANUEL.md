@@ -140,8 +140,12 @@ cd android-app
    ```bash
    cd android-app
    ./gradlew connectedAndroidTest
+   ./gradlew :app:connectedComposeDebugAndroidTest
    ```
-   Android Studio propose aussi le bouton *Run tests in device*.
+   - `connectedAndroidTest` valide la pile réseau TLS/mTLS et la logique de ViewModel.
+   - `connectedComposeDebugAndroidTest` couvre la nouvelle vue cabine (sélecteurs, manipulateur, transitions retour).
+
+> **Pré-requis** : définissez `cab.video.previewUrl` dans `android-app/local.properties` pour qu'un flux vidéo (ESP32 ou mock `scripts/mock_video_server.py`) soit accessible pendant les tests Compose. Sans flux, les assertions de statut « Flux disponible » échoueront.
 
 #### Tests manuels
 
@@ -173,34 +177,52 @@ cd android-app
 3. **Intégration continue** : ajouter une étape de tests end-to-end utilisant le nouveau protocole (mock serveur) et un test de non-régression s’assurant que l’ancien mode HTTP est explicitement marqué obsolète.
 4. **Retrait HTTP** : planifier une version mineure annonçant la fin du support HTTP, fournir une période de double pile de deux releases, puis retirer les endpoints HTTP et les adapters temporaires.
 
-## 5. Mode d’emploi – Vue générale multi-train
+## 5. Mode d’emploi – Parcours opérateur multi-train
 
-La page d’accueil de l’application présente désormais **la liste de toutes les rames connues** ainsi que leur état en temps réel.
+La page d’accueil présente une **liste simple** des rames enregistrées. Chaque item affiche alias, disponibilité et deux boutons texte (*Activer*, *Détails*). Aucune carte graphique n’est requise : la priorité est la rapidité d’activation sur tablette ou pupitre industriel.
 
-### 5.1 Ajouter ou retirer un train
+### 5.1 Gestion des trains
 
-- **Ajouter** : utiliser le bouton *Ajouter un train*. Une boîte de dialogue demande l’identifiant de rame (UUID), l’alias affiché et l’URL du canal de commandes. Dès validation, le train apparaît dans la liste avec l’état « Connexion en cours ».
-- **Retirer** : via le menu *⋮* de chaque carte, sélectionner *Supprimer*. La suppression coupe la session WebSocket, efface les secrets associés et retire le train de la vue générale.
-- **Réordonner** : un glisser-déposer permet de prioriser les rames les plus critiques (ordre persistant dans les préférences locales).
+- **Ajouter** : bouton *Ajouter un train* ouvrant un dialogue minimal (UUID, alias, URL commande, URL vidéo). L’entrée apparaît aussitôt dans la liste.
+- **Retirer** : menu *⋮* > *Supprimer* coupe la session WebSocket, supprime les secrets et retire l’item.
+- **Réordonner** : un glisser-déposer reste disponible pour prioriser les rames critiques (ordre persistant).
 
-### 5.2 Indicateurs de connexion
+### 5.2 Indicateurs de connexion et disponibilité
 
-Chaque carte de train affiche un **pictogramme circulaire** indiquant la santé de la connexion :
+Les états se matérialisent par un pictogramme circulaire et une pastille texte adjacente :
 
-- 🟢 `Connecté` : la dernière télémétrie date de moins de `T₁`.
-- 🟠 `Fail-safe` : absence de commandes ayant déclenché la rampe (`T₁`). Une jauge circulaire affiche la progression (`fail_safe_elapsed_ms / rampDuration`).
-- 🔴 `Relâché` : aucun message reçu depuis `T₂`. La session a été libérée et le train est en attente d’un nouveau pilote.
-- ⚪ `Déconnecté` : échec réseau ou suppression volontaire.
+- 🟢 `Connecté` : télémétrie < `T₁`.
+- 🟠 `Fail-safe` : rampe active (`T₁`), jauge circulaire indiquant la progression.
+- 🔴 `Relâché` : aucune commande valide depuis `T₂`.
+- ⚪ `Déconnecté` : perte réseau.
+- `Disponible` / `Réservé` / `Verrouillé (fail-safe)` s’affichent dans la pastille pour refléter l’état d’occupation.
 
-### 5.3 Indicateurs de disponibilité
+Lorsque `T₂` est atteint, la pastille revient à `Disponible` et le bouton *Activer* réapparaît automatiquement. Une notification toast informe l’opérateur que la session a été relâchée.
 
-Une **pastille textuelle** complète l’icône :
+### 5.3 Activation de la cabine
 
-- `Disponible` : aucun pilote n’est sélectionné (état initial, relâchement automatique `T₂` ou relâchement manuel). L’app permet immédiatement de se connecter.
-- `Réservé` : un opérateur actif a pris la main (télémétrie `fail_safe = false` et session valide).
-- `Verrouillé (fail-safe)` : la rampe est active (`T₁`) ; l’application affiche l’action *Attendre la fin de la rampe* et empêche toute nouvelle commande.
+1. Taper sur *Activer* ouvre la **surimpression cabine** : le flux vidéo de l’ESP32 occupe l’arrière-plan.
+2. Un **manipulateur circulaire** (Compose) se superpose pour régler vitesse et direction (glisser vers l’avant/arrière).
+3. Des **sélecteurs textuels** apparaissent sur le côté droit pour les actions rapides : *Feux auto*, *Relâcher*, *Profil lent/rapide*.
+4. Un bandeau supérieur rappelle l’état du train, la qualité du flux vidéo et propose *Retour à la liste*.
 
-Lorsque `T₂` est atteint, la pastille repasse automatiquement à `Disponible`, les feux virent au rouge clignotant (cf. § 2.3) et la carte affiche un bouton *Reprendre ce train*. Cette cohérence garantit que le flux multi-train reste aligné avec les seuils décrits plus haut.
+### 5.4 Déroulé utilisateur
+
+1. **Sélection** : choisir une rame `Disponible` dans la liste.
+2. **Activation** : l’app réclame le verrou mTLS, passe la rame en `Réservé` et affiche la cabine.
+3. **Pilotage** : utiliser le manipulateur pour ajuster vitesse et sens ; les boutons textuels modifient les auxiliaires.
+4. **Perte de disponibilité** : si `fail_safe` s’active ou qu’un autre opérateur libère la rame, la surimpression affiche une alerte et désactive les contrôles.
+5. **Retour** : valider l’alerte renvoie automatiquement à la liste avec le train marqué `Relâché`. L’opérateur peut immédiatement choisir une autre rame.
+
+### 5.5 Configuration des visuels cabine
+
+Les overlays et manipulateurs sont gérés via `android-app/app/src/main/assets/cabs.json` et les ressources associées :
+
+1. Déposer les overlays PNG dans `res/drawable/cab/`.
+2. Associer `overlay`, `manipulator` et `videoUrl` dans `cabs.json` pour chaque `trainId`.
+3. Redémarrer l’application (ou *hot reload* Compose) pour charger la configuration.
+
+> **Flux vidéo ESP32** : chaque entrée `videoUrl` doit pointer vers le flux MJPEG/RTSP sécurisé. En développement, utilisez `scripts/mock_video_server.py --source assets/sample.mp4` puis définissez `http://127.0.0.1:8088/stream.mjpeg` pour valider les tests.
 
 ## 6. Intégration continue (optionnel)
 
