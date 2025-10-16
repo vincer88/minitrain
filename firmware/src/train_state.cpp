@@ -17,6 +17,9 @@ void TrainState::applyEmergencyStop() {
     lastUpdated = std::chrono::steady_clock::now();
     failSafeActive = false;
     realtime.failSafeRampStart.reset();
+    pilotReleaseActive = false;
+    realtime.pilotReleaseTelemetrySent = false;
+    realtime.pilotReleaseLightsLatched = false;
 }
 
 void TrainState::updateTargetSpeed(float newTarget) {
@@ -59,6 +62,10 @@ void TrainState::setBatteryVoltage(float voltage) {
 
 void TrainState::updateCommandTimestamp(std::chrono::steady_clock::time_point timestamp) {
     realtime.lastCommandTimestamp = timestamp;
+    failSafeActive = false;
+    pilotReleaseActive = false;
+    realtime.failSafeRampStart.reset();
+    realtime.pilotReleaseTelemetrySent = false;
     lastUpdated = std::chrono::steady_clock::now();
 }
 

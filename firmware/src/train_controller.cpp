@@ -14,21 +14,42 @@ constexpr float clampMotorCommand(float value) {
 void updateLights(TrainState &state) {
     LightController::applyAutomaticLogic(state);
 }
+
+TelemetrySample makeAvailabilitySample(const TrainState &state) {
+    TelemetrySample sample{};
+    sample.speedMetersPerSecond = state.appliedSpeed;
+    sample.batteryVoltage = state.batteryVoltage;
+    sample.failSafeActive = state.failSafeActive;
+    sample.lightsState = state.lightsState;
+    sample.lightsSource = state.lightsSource;
+    sample.activeCab = state.activeCab;
+    sample.lightsOverrideMask = state.lightsOverrideMask;
+    sample.lightsTelemetryOnly = state.lightsTelemetryOnly;
+    sample.appliedSpeedMetersPerSecond = state.appliedSpeed;
+    sample.appliedDirection = state.direction;
+    sample.source = TelemetrySource::Instantaneous;
+    return sample;
+}
 } // namespace
 
 TrainController::TrainController(PidController speedController, MotorCommandWriter motorWriter,
                                  TelemetryPublisher telemetryPublisher,
                                  std::chrono::steady_clock::duration staleCommandThreshold,
+                                 std::chrono::steady_clock::duration pilotReleaseDuration,
                                  std::chrono::steady_clock::duration failSafeRampDuration, Clock clock)
     : state_{}, pid_{std::move(speedController)}, motorWriter_{std::move(motorWriter)},
       telemetryPublisher_{std::move(telemetryPublisher)}, telemetryAggregator_{20},
-      staleCommandThreshold_{staleCommandThreshold}, failSafeRampDuration_{failSafeRampDuration},
+      staleCommandThreshold_{staleCommandThreshold}, pilotReleaseDuration_{pilotReleaseDuration},
+      failSafeRampDuration_{failSafeRampDuration},
       clock_{std::move(clock)} {
     if (!clock_) {
         clock_ = [] { return std::chrono::steady_clock::now(); };
     }
     state_.realtime.lastCommandTimestamp = clock_();
     state_.failSafeRampDuration = failSafeRampDuration_;
+    state_.pilotReleaseDuration = pilotReleaseDuration_;
+    state_.pilotReleaseActive = false;
+    state_.realtime.pilotReleaseTelemetrySent = false;
 }
 
 void TrainController::setTargetSpeed(float metersPerSecond) {
@@ -94,7 +115,29 @@ void TrainController::onSpeedMeasurement(float measuredSpeed, std::chrono::stead
         return;
     }
     const auto age = now - state_.realtime.lastCommandTimestamp;
-    if (age > staleCommandThreshold_) {
+    const bool pilotReleaseEnabled = pilotReleaseDuration_ > std::chrono::steady_clock::duration::zero();
+    bool pilotReleaseTriggered = false;
+
+    if (!state_.pilotReleaseActive && pilotReleaseEnabled && age > pilotReleaseDuration_) {
+        state_.pilotReleaseActive = true;
+        pilotReleaseTriggered = true;
+        state_.failSafeActive = false;
+        state_.realtime.failSafeRampStart.reset();
+        state_.realtime.lightsLatched = false;
+        if (!state_.realtime.pilotReleaseLightsLatched) {
+            state_.realtime.lightsOverrideMaskBeforePilotRelease = state_.lightsOverrideMask;
+            state_.realtime.lightsTelemetryOnlyBeforePilotRelease = state_.lightsTelemetryOnly;
+            state_.realtime.pilotReleaseLightsLatched = true;
+        }
+        state_.lightsOverrideMask = 0;
+        state_.lightsTelemetryOnly = false;
+        state_.setDirection(Direction::Neutral);
+        state_.setActiveCab(ActiveCab::None);
+        state_.updateTargetSpeed(0.0F);
+        pid_.reset();
+    }
+
+    if (!state_.pilotReleaseActive && age > staleCommandThreshold_) {
         if (!state_.failSafeActive) {
             state_.failSafeActive = true;
             state_.realtime.failSafeRampStart = now;
@@ -103,17 +146,22 @@ void TrainController::onSpeedMeasurement(float measuredSpeed, std::chrono::stead
             state_.realtime.lightsSourceBeforeFailSafe = state_.lightsSource;
             state_.realtime.lightsLatched = true;
         }
-    } else if (state_.failSafeActive) {
+    } else if (state_.failSafeActive && (age <= staleCommandThreshold_ || state_.pilotReleaseActive)) {
         state_.failSafeActive = false;
         state_.realtime.failSafeRampStart.reset();
-        if (state_.realtime.lightsLatched) {
+        if (state_.realtime.lightsLatched && !state_.pilotReleaseActive) {
             state_.lightsState = state_.realtime.lightsBeforeFailSafe;
             state_.lightsSource = state_.realtime.lightsSourceBeforeFailSafe;
-            state_.realtime.lightsLatched = false;
         }
+        state_.realtime.lightsLatched = false;
     }
 
     updateLights(state_);
+
+    if (state_.pilotReleaseActive && (!state_.realtime.pilotReleaseTelemetrySent || pilotReleaseTriggered)) {
+        telemetryPublisher_(makeAvailabilitySample(state_));
+        state_.realtime.pilotReleaseTelemetrySent = true;
+    }
 
     if (state_.failSafeActive) {
         const auto rampDuration = state_.failSafeRampDuration.count() <= 0
@@ -142,6 +190,12 @@ void TrainController::onSpeedMeasurement(float measuredSpeed, std::chrono::stead
         motorWriter_(0.0F);
         return;
     }
+
+    if (state_.pilotReleaseActive) {
+        motorWriter_(0.0F);
+        return;
+    }
+
     const float pidOutput = pid_.update(state_.targetSpeed, measuredSpeed, dt);
     motorWriter_(clampMotorCommand(pidOutput));
 }
@@ -165,14 +219,22 @@ void TrainController::onTelemetrySample(const TelemetrySample &sample) {
 
 void TrainController::registerCommandTimestamp(std::chrono::steady_clock::time_point timestamp) {
     std::scoped_lock lock(mutex_);
+    const bool wasFailSafeActive = state_.failSafeActive;
+    const bool wasPilotReleased = state_.pilotReleaseActive;
     state_.updateCommandTimestamp(timestamp);
-    if (state_.failSafeActive) {
-        state_.failSafeActive = false;
-        state_.realtime.failSafeRampStart.reset();
+    if (wasFailSafeActive) {
         if (state_.realtime.lightsLatched) {
             state_.lightsState = state_.realtime.lightsBeforeFailSafe;
             state_.lightsSource = state_.realtime.lightsSourceBeforeFailSafe;
             state_.realtime.lightsLatched = false;
+        }
+    }
+    if (wasPilotReleased) {
+        state_.pilotReleaseActive = false;
+        if (state_.realtime.pilotReleaseLightsLatched) {
+            state_.lightsOverrideMask = state_.realtime.lightsOverrideMaskBeforePilotRelease;
+            state_.lightsTelemetryOnly = state_.realtime.lightsTelemetryOnlyBeforePilotRelease;
+            state_.realtime.pilotReleaseLightsLatched = false;
         }
     }
     updateLights(state_);

@@ -39,6 +39,10 @@ struct RealtimeSession {
     LightsState lightsBeforeFailSafe{LightsState::BothRed};
     LightsSource lightsSourceBeforeFailSafe{LightsSource::Automatic};
     bool lightsLatched{false};
+    bool pilotReleaseTelemetrySent{false};
+    std::uint8_t lightsOverrideMaskBeforePilotRelease{0};
+    bool lightsTelemetryOnlyBeforePilotRelease{false};
+    bool pilotReleaseLightsLatched{false};
 };
 
 struct TrainState {
@@ -50,7 +54,9 @@ struct TrainState {
     float batteryVoltage{0.0F};
     std::chrono::steady_clock::time_point lastUpdated{std::chrono::steady_clock::now()};
     std::chrono::steady_clock::duration failSafeRampDuration{};
+    std::chrono::steady_clock::duration pilotReleaseDuration{};
     bool failSafeActive{false};
+    bool pilotReleaseActive{false};
     ActiveCab activeCab{ActiveCab::None};
     LightsState lightsState{LightsState::BothRed};
     LightsSource lightsSource{LightsSource::Automatic};
