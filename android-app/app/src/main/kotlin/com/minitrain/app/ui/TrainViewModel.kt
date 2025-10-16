@@ -1,5 +1,6 @@
 package com.minitrain.app.ui
 
+import com.minitrain.app.model.ActiveCab
 import com.minitrain.app.model.ControlState
 import com.minitrain.app.model.Direction
 import com.minitrain.app.model.Telemetry
@@ -36,6 +37,8 @@ class TrainViewModel(
     val controlState: StateFlow<ControlState> = _controlState.asStateFlow()
     private val _failsafeRampStatus = MutableStateFlow(FailsafeRampStatus.inactive())
     val failsafeRampStatus: StateFlow<FailsafeRampStatus> = _failsafeRampStatus.asStateFlow()
+    private val _activeCab = MutableStateFlow(ActiveCab.NONE)
+    val activeCab: StateFlow<ActiveCab> = _activeCab.asStateFlow()
 
     private val realtimeJob: Job
     private val telemetryJob: Job
@@ -50,6 +53,7 @@ class TrainViewModel(
         telemetryJob = scope.launch {
             repository.telemetry.collect { telemetry ->
                 _telemetry.value = telemetry
+                _activeCab.value = telemetry.activeCab
             }
         }
         failsafeJob = scope.launch {
@@ -101,6 +105,11 @@ class TrainViewModel(
         _controlState.value = _controlState.value.copy(direction = direction)
     }
 
+    fun setActiveCab(cab: ActiveCab) {
+        if (_failsafeRampStatus.value.isActive) return
+        _activeCab.value = cab
+    }
+
     fun emergencyStop() {
         if (_failsafeRampStatus.value.isActive) return
         _controlState.value = _controlState.value.copy(targetSpeed = 0.0, emergencyStop = true)
@@ -116,6 +125,7 @@ class TrainViewModel(
             repository.stopVideoStream()
             repository.releaseVideoStream()
         }
+        _activeCab.value = ActiveCab.NONE
     }
 
     fun startVideoStream(url: String) {

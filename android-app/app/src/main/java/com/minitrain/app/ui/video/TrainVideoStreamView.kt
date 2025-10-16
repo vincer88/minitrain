@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.AttributeSet
 import android.view.Gravity
 import android.view.View
+import android.view.ViewTreeObserver
 import android.widget.FrameLayout
 import android.widget.ProgressBar
 import android.widget.TextView
@@ -40,6 +41,10 @@ class TrainVideoStreamView @JvmOverloads constructor(
         }
     }
 
+    private var overlayView: View? = null
+    private var onSurfaceReadyListener: (() -> Unit)? = null
+    private var surfaceDispatched = false
+
     init {
         addView(playerView)
         addView(progressBar)
@@ -61,5 +66,60 @@ class TrainVideoStreamView @JvmOverloads constructor(
             errorTextView.visibility = View.VISIBLE
             errorTextView.text = errorMessage
         }
+    }
+
+    fun setOverlayView(view: View?) {
+        if (overlayView === view) {
+            return
+        }
+        overlayView?.let { removeView(it) }
+        overlayView = view
+        view?.let {
+            val progressIndex = indexOfChild(progressBar)
+            if (progressIndex >= 0) {
+                addView(it, progressIndex)
+            } else {
+                addView(it)
+            }
+        }
+    }
+
+    fun setOnSurfaceReadyListener(listener: (() -> Unit)?) {
+        onSurfaceReadyListener = listener
+        surfaceDispatched = false
+        if (listener != null) {
+            if (isLaidOut) {
+                dispatchSurfaceReady()
+            } else {
+                viewTreeObserver.addOnGlobalLayoutListener(object : ViewTreeObserver.OnGlobalLayoutListener {
+                    override fun onGlobalLayout() {
+                        if (isLaidOut) {
+                            viewTreeObserver.removeOnGlobalLayoutListener(this)
+                            dispatchSurfaceReady()
+                        }
+                    }
+                })
+            }
+        }
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        if (onSurfaceReadyListener != null && isLaidOut) {
+            dispatchSurfaceReady()
+        }
+    }
+
+    override fun onDetachedFromWindow() {
+        super.onDetachedFromWindow()
+        surfaceDispatched = false
+    }
+
+    private fun dispatchSurfaceReady() {
+        if (surfaceDispatched) {
+            return
+        }
+        surfaceDispatched = true
+        post { onSurfaceReadyListener?.invoke() }
     }
 }
