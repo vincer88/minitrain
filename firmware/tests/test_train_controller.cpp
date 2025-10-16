@@ -16,13 +16,14 @@ int runTrainControllerTests() {
     Clock::time_point now{};
     auto clock = [&now]() { return now; };
     const auto staleThreshold = std::chrono::milliseconds(120);
+    const auto pilotReleaseDuration = std::chrono::milliseconds(500);
     const auto rampDuration = std::chrono::milliseconds(300);
 
     TrainController controller(
         PidController{0.5F, 0.05F, 0.01F, 0.0F, 1.0F},
         [&motorCommands](float command) { motorCommands.push_back(command); },
         [&publishedTelemetry](const TelemetrySample &sample) { publishedTelemetry.push_back(sample); },
-        staleThreshold, rampDuration, clock);
+        staleThreshold, pilotReleaseDuration, rampDuration, clock);
 
     controller.registerCommandTimestamp(now);
     controller.setTargetSpeed(1.5F);
@@ -159,6 +160,7 @@ int runTrainControllerTests() {
     }
 
     now += rampDuration;
+    const auto telemetryBeforeRelease = publishedTelemetry.size();
     controller.onSpeedMeasurement(0.2F, std::chrono::milliseconds{50});
     failState = controller.state();
     if (failState.targetSpeed > 0.01F) {
@@ -169,11 +171,35 @@ int runTrainControllerTests() {
         std::cerr << "Direction should lock to neutral after ramp" << std::endl;
         return 1;
     }
+    if (!failState.pilotReleaseActive) {
+        std::cerr << "Pilot release should activate after extended inactivity" << std::endl;
+        return 1;
+    }
+    if (failState.activeCab != ActiveCab::None) {
+        std::cerr << "Pilot release should clear active cab" << std::endl;
+        return 1;
+    }
+    if (failState.lightsState != LightsState::BothRed || failState.lightsSource != LightsSource::Automatic) {
+        std::cerr << "Pilot release should force bilateral red lights" << std::endl;
+        return 1;
+    }
+    if (publishedTelemetry.size() != telemetryBeforeRelease + 1 ||
+        publishedTelemetry.back().activeCab != ActiveCab::None ||
+        publishedTelemetry.back().lightsState != LightsState::BothRed ||
+        publishedTelemetry.back().lightsSource != LightsSource::Automatic ||
+        publishedTelemetry.back().failSafeActive) {
+        std::cerr << "Pilot release should publish availability telemetry" << std::endl;
+        return 1;
+    }
 
     controller.registerCommandTimestamp(now + staleThreshold);
     auto recoveredState = controller.state();
     if (recoveredState.failSafeActive) {
         std::cerr << "Fail-safe should clear after fresh command" << std::endl;
+        return 1;
+    }
+    if (recoveredState.pilotReleaseActive) {
+        std::cerr << "Pilot release should clear after fresh command" << std::endl;
         return 1;
     }
     if (recoveredState.lightsSource != LightsSource::Override ||

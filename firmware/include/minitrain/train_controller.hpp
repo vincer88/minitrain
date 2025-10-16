@@ -15,6 +15,10 @@ namespace minitrain {
 #define MINITRAIN_FAILSAFE_THRESHOLD_MS 250
 #endif
 
+#ifndef MINITRAIN_PILOT_RELEASE_MS
+#define MINITRAIN_PILOT_RELEASE_MS 5000
+#endif
+
 #ifndef MINITRAIN_FAILSAFE_RAMP_MS
 #define MINITRAIN_FAILSAFE_RAMP_MS 1000
 #endif
@@ -28,6 +32,8 @@ class TrainController {
     TrainController(PidController speedController, MotorCommandWriter motorWriter, TelemetryPublisher telemetryPublisher,
                    std::chrono::steady_clock::duration staleCommandThreshold =
                        std::chrono::milliseconds{MINITRAIN_FAILSAFE_THRESHOLD_MS},
+                   std::chrono::steady_clock::duration pilotReleaseDuration =
+                       std::chrono::milliseconds{MINITRAIN_PILOT_RELEASE_MS},
                    std::chrono::steady_clock::duration failSafeRampDuration =
                        std::chrono::milliseconds{MINITRAIN_FAILSAFE_RAMP_MS},
                    Clock clock = {});
@@ -55,6 +61,7 @@ class TrainController {
     TelemetryPublisher telemetryPublisher_;
     TelemetryAggregator telemetryAggregator_;
     std::chrono::steady_clock::duration staleCommandThreshold_;
+    std::chrono::steady_clock::duration pilotReleaseDuration_;
     std::chrono::steady_clock::duration failSafeRampDuration_;
     Clock clock_;
 };
