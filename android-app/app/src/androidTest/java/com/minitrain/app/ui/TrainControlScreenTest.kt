@@ -5,6 +5,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasSetProgressAction
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNode
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
@@ -103,6 +104,7 @@ class TrainControlScreenTest {
         }
 
         composeRule.waitForIdle()
+        composeRule.onNodeWithContentDescription("Illustration de la cabine du train").assertIsDisplayed()
         screenshotRule.capture("train_control_initial", composeRule.onRoot())
 
         composeRule.onNodeWithText("Vitesse cible").assertIsDisplayed()
