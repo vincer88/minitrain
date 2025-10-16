@@ -34,16 +34,30 @@ Les réponses télémétriques réutilisent `session_id` et `seq` pour corréler
 ### 2.2 Sécurité et résilience
 
 - **Chiffrement & authentification** : toutes les connexions sont chiffrées (TLS 1.3 minimum). L’authentification mutuelle est réalisée via certificats clients pour la cabine et via OAuth2 mTLS pour les applications mobiles. Les jetons expirent après 12 heures et doivent être renégociés hors bande.
-- **Détection de perte** : un seuil unique (par défaut 150 ms) est configurable côté firmware et côté client. Lorsque l’écart entre le `timestamp` le plus récent et l’horloge locale dépasse ce seuil, une rampe d’arrêt progressive est déclenchée.
-- **Rampe d’arrêt** : la durée de la rampe est configurable (1000 ms par défaut). Pendant la rampe, `target_speed` est décrémentée linéairement jusqu’à 0 avec maintien de la dernière direction connue, puis la direction repasse à neutre. Seule la vitesse moteur est ramenée à zéro tandis que la logique d’éclairage automatique continue de s’appliquer.
+- **Détection de perte** : deux seuils configurables encadrent désormais la sécurité des trains.
+  - `T₁` (*fail-safe ramp*) : par défaut 150 ms. Dès que l’écart entre le `timestamp` le plus récent et l’horloge locale dépasse `T₁`, une rampe d’arrêt progressive est déclenchée. La télémétrie bascule `lights_source` sur `fail_safe` et force l’affichage **rouge bilatéral fixe**.
+  - `T₂` (*pilot release*) : par défaut 5 s. Si aucune commande valide n’est reçue pendant `T₂`, le contrôleur considère que le pilote ne maintient plus la session. Le train est alors relâché automatiquement (voir § 2.4) et un nouvel opérateur peut le sélectionner.
+- **Rampe d’arrêt** : la durée de la rampe est configurable (1000 ms par défaut). Pendant la rampe, `target_speed` est décrémentée linéairement jusqu’à 0 avec maintien de la dernière direction connue, puis la direction repasse à neutre. La logique d’éclairage automatique continue de s’appliquer, mais l’état lumineux reste **rouge** tant que `fail_safe` est actif.
 
 ### 2.3 Logique d’éclairage et télémétrie
 
-- **Connexion active sans cabine sélectionnée** : feux rouges bilatéraux permanents.
+- **Connexion active sans cabine sélectionnée** : feux rouges bilatéraux permanents et état « disponible » publié.
 - **Cabine sélectionnée en marche avant** : feu blanc allumé côté cabine, feu rouge opposé.
 - **Cabine sélectionnée en marche arrière** : inversion des couleurs (blanc vers l’arrière réel de la rame). La télémétrie renvoie l’état courant (`lights_state`) ainsi que la source de décision (`auto`, `override`, `fail_safe`).
+- **Fail-safe ramp (`T₁`)** : dès l’activation, les feux restent **rouges fixes** même si une direction avait été demandée. La télémétrie expose `fail_safe = true` et inclut `fail_safe_elapsed_ms` pour permettre à l’application de représenter la progression de la rampe.
+- **Pilot release (`T₂`)** : lorsque la libération automatique est déclenchée, les feux passent en **rouge clignotant** jusqu’à ce qu’un opérateur reprenne la main ou qu’un ordre de parcage manuel soit appliqué. La session courante est marquée comme expirée.
 - **Overrides** : lorsqu’un bit `lights_override` est actif, le firmware publie l’état forcé et la télémétrie indique `override`. À la désactivation, la logique automatique reprend dès la prochaine commande valide.
 - **Synchronisation** : chaque message de télémétrie inclut `session_id`, `seq`, `timestamp` et reflète la direction/ vitesse réellement appliquées pour permettre la validation client.
+
+### 2.4 Disponibilité d’un train
+
+Un train est déclaré **disponible** dans les cas suivants :
+
+1. Aucune cabine n’est sélectionnée (état initial après démarrage ou après un `pilot release`).
+2. La durée sans commandes dépasse `T₂` : le firmware force la libération du pilote et remet l’état d’éclairage en rouge clignotant pour signaler que la rame attend un nouvel opérateur.
+3. Un opérateur déclenche manuellement l’action *Relâcher* dans l’application Android ou sur la cabine.
+
+Tant que la télémétrie indique `fail_safe = true`, la rame n’est pas disponible même si la session a expiré : l’application doit attendre la fin de la rampe (progression à 100 %) avant d’autoriser un nouveau démarrage.
 
 ## 3. Firmware C++ (ESP32)
 
@@ -159,21 +173,50 @@ cd android-app
 3. **Intégration continue** : ajouter une étape de tests end-to-end utilisant le nouveau protocole (mock serveur) et un test de non-régression s’assurant que l’ancien mode HTTP est explicitement marqué obsolète.
 4. **Retrait HTTP** : planifier une version mineure annonçant la fin du support HTTP, fournir une période de double pile de deux releases, puis retirer les endpoints HTTP et les adapters temporaires.
 
-## 5. Intégration continue (optionnel)
+## 5. Mode d’emploi – Vue générale multi-train
+
+La page d’accueil de l’application présente désormais **la liste de toutes les rames connues** ainsi que leur état en temps réel.
+
+### 5.1 Ajouter ou retirer un train
+
+- **Ajouter** : utiliser le bouton *Ajouter un train*. Une boîte de dialogue demande l’identifiant de rame (UUID), l’alias affiché et l’URL du canal de commandes. Dès validation, le train apparaît dans la liste avec l’état « Connexion en cours ».
+- **Retirer** : via le menu *⋮* de chaque carte, sélectionner *Supprimer*. La suppression coupe la session WebSocket, efface les secrets associés et retire le train de la vue générale.
+- **Réordonner** : un glisser-déposer permet de prioriser les rames les plus critiques (ordre persistant dans les préférences locales).
+
+### 5.2 Indicateurs de connexion
+
+Chaque carte de train affiche un **pictogramme circulaire** indiquant la santé de la connexion :
+
+- 🟢 `Connecté` : la dernière télémétrie date de moins de `T₁`.
+- 🟠 `Fail-safe` : absence de commandes ayant déclenché la rampe (`T₁`). Une jauge circulaire affiche la progression (`fail_safe_elapsed_ms / rampDuration`).
+- 🔴 `Relâché` : aucun message reçu depuis `T₂`. La session a été libérée et le train est en attente d’un nouveau pilote.
+- ⚪ `Déconnecté` : échec réseau ou suppression volontaire.
+
+### 5.3 Indicateurs de disponibilité
+
+Une **pastille textuelle** complète l’icône :
+
+- `Disponible` : aucun pilote n’est sélectionné (état initial, relâchement automatique `T₂` ou relâchement manuel). L’app permet immédiatement de se connecter.
+- `Réservé` : un opérateur actif a pris la main (télémétrie `fail_safe = false` et session valide).
+- `Verrouillé (fail-safe)` : la rampe est active (`T₁`) ; l’application affiche l’action *Attendre la fin de la rampe* et empêche toute nouvelle commande.
+
+Lorsque `T₂` est atteint, la pastille repasse automatiquement à `Disponible`, les feux virent au rouge clignotant (cf. § 2.3) et la carte affiche un bouton *Reprendre ce train*. Cette cohérence garantit que le flux multi-train reste aligné avec les seuils décrits plus haut.
+
+## 6. Intégration continue (optionnel)
 
 - Ajoutez un pipeline (GitHub Actions, GitLab CI) qui exécute les commandes principales :
   - Firmware : `cmake -S firmware -B firmware/build`, `cmake --build firmware/build`, `ctest --test-dir firmware/build`.
   - Android : `./gradlew test` et `./gradlew lint`.
   - Pour les déploiements, déclenchez des jobs manuels (`./gradlew publish` ou scripts `idf.py flash`).
 
-## 6. Résolution de problèmes
+## 7. Résolution de problèmes
 
 - Nettoyage CMake : supprimez `firmware/build/` puis relancez la configuration.
 - Nettoyage Gradle : `./gradlew clean`.
 - Emulateur lent : désactivez les animations et activez l’accélération matérielle (Intel HAXM/Hypervisor). Redémarrez l’AVD si des erreurs `INSTALL_FAILED` apparaissent.
 - Flash ESP32 : vérifiez les permissions (`sudo usermod -aG dialout $USER`) et réduisez la vitesse avec `--flash_freq` si la communication échoue.
 
-## 7. Ressources complémentaires
+## 8. Ressources complémentaires
 
 - Documentation ESP-IDF : https://docs.espressif.com/
 - Documentation Android Developer : https://developer.android.com/
