@@ -124,8 +124,9 @@ int runTrainControllerTests() {
     }
 
     motorCommands.clear();
-    controller.registerCommandTimestamp(now - staleThreshold - std::chrono::milliseconds(50));
-    now += std::chrono::milliseconds(200);
+    const auto failSafeLead = staleThreshold + std::chrono::milliseconds(110);
+    controller.registerCommandTimestamp(now);
+    now += failSafeLead;
     controller.onSpeedMeasurement(0.4F, std::chrono::milliseconds{50});
 
     auto failState = controller.state();
@@ -143,6 +144,68 @@ int runTrainControllerTests() {
     }
     if (failState.targetSpeed > 0.5F) {
         std::cerr << "Target speed should start ramping down" << std::endl;
+        return 1;
+    }
+
+    const auto telemetryBeforePilotRelease = publishedTelemetry.size();
+    auto preReleaseDelta = pilotReleaseDuration - failSafeLead - std::chrono::milliseconds(10);
+    if (preReleaseDelta <= std::chrono::milliseconds::zero()) {
+        preReleaseDelta = std::chrono::milliseconds(1);
+    }
+    now += preReleaseDelta;
+    controller.onSpeedMeasurement(0.3F, std::chrono::milliseconds{50});
+    failState = controller.state();
+    if (!failState.failSafeActive) {
+        std::cerr << "Fail-safe should remain active prior to pilot release" << std::endl;
+        return 1;
+    }
+    if (failState.pilotReleaseActive) {
+        std::cerr << "Pilot release should not activate before its threshold" << std::endl;
+        return 1;
+    }
+
+    controller.registerCommandTimestamp(now);
+    auto canceledState = controller.state();
+    if (canceledState.failSafeActive) {
+        std::cerr << "Fail-safe should clear when a fresh command arrives" << std::endl;
+        return 1;
+    }
+    if (canceledState.pilotReleaseActive) {
+        std::cerr << "Pilot release should cancel when a fresh command arrives" << std::endl;
+        return 1;
+    }
+    if (canceledState.lightsSource != LightsSource::Override ||
+        canceledState.lightsState != LightsState::FrontRedRearWhite) {
+        std::cerr << "Fresh commands should restore override lighting" << std::endl;
+        return 1;
+    }
+    if (publishedTelemetry.size() != telemetryBeforePilotRelease) {
+        std::cerr << "Availability telemetry should not be published before pilot release" << std::endl;
+        return 1;
+    }
+
+    now += staleThreshold / 2;
+    controller.onSpeedMeasurement(0.3F, std::chrono::milliseconds{50});
+    auto postCancelState = controller.state();
+    if (postCancelState.failSafeActive) {
+        std::cerr << "Fail-safe should stay clear immediately after a fresh command" << std::endl;
+        return 1;
+    }
+    if (postCancelState.pilotReleaseActive) {
+        std::cerr << "Pilot release should not immediately retrigger after cancellation" << std::endl;
+        return 1;
+    }
+
+    now += failSafeLead;
+    controller.onSpeedMeasurement(0.2F, std::chrono::milliseconds{50});
+
+    failState = controller.state();
+    if (!failState.failSafeActive) {
+        std::cerr << "Fail-safe should re-activate once the stale threshold elapses again" << std::endl;
+        return 1;
+    }
+    if (failState.pilotReleaseActive) {
+        std::cerr << "Pilot release should still wait for its full timeout" << std::endl;
         return 1;
     }
 
