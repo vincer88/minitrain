@@ -67,16 +67,43 @@ Ce guide décrit comment provisionner les secrets et orchestrer leur rotation af
 
 
 
+## Paramétrage des timeouts de commande et validation de la disponibilité
+### Firmware
+1. Ajustez les nouveaux seuils en CMake en positionnant `-DMINITRAIN_FAILSAFE_THRESHOLD_MS=<ms>` (délais avant fail-safe) et `-DMINITRAIN_FAILSAFE_RAMP_MS=<ms>` (durée de la rampe d'arrêt) lors de la génération (`cmake -S firmware -B firmware/build -DMINITRAIN_FAILSAFE_THRESHOLD_MS=300 -DMINITRAIN_FAILSAFE_RAMP_MS=1200`). Pour ESP-IDF/Zepyhr, les mêmes symboles sont exposés dans `menuconfig` sous *Minitrain → Command timeout*.
+2. Générez et flashez le firmware. Vérifiez dans les journaux série que le contrôleur annonce les seuils attendus au démarrage. Conservez un tableau de correspondance train → valeur de timeout pour tracer les déviations lors des audits.
+
+### Services back-end
+1. Publiez la valeur équivalente côté orchestrateur de commandes via vos variables d'environnement ou Helm charts : `MINITRAIN_COMMAND_TIMEOUT_MS` (fail-safe firmware) et `MINITRAIN_PILOT_RELEASE_MS` (fenêtre d'abandon opérateur). Les services doivent rejeter toute commande dont l'horodatage dépasse ces seuils pour rester cohérents avec le firmware.
+2. Redémarrez les services concernés et faites valider la configuration via les health-checks `/status` (les réponses doivent exposer les nouveaux seuils dans la section `commandTimeouts`). Archivez la sortie pour le dossier de déploiement.
+
+### Validation de la signalisation de disponibilité (staging)
+1. Poussez au moins deux rames instrumentées sur l'environnement de staging et forcez une rotation des pilotes (session WebSocket interrompue) pour vérifier que l'indicateur *Disponible* bascule côté application et que le bus d'événements publie l'état `AVAILABLE` en moins de 3 s.
+2. Soumettez une commande expirée depuis un script de test ; contrôlez que la télémétrie signale `fail_safe` et que la bannière de disponibilité repasse à *Indisponible* jusqu'à réception d'une commande fraîche.
+3. En fin de boucle, capturez les métriques Prometheus/OTEL `command_timeout_trigger_total` et `train_availability_state` pour confirmer qu'elles reflètent les tests effectués avant d'autoriser la promotion vers la production.
+
+## Initialisation de l'annuaire des trains mobiles
+1. Préparez la configuration distante (Remote Config ou Feature Flags) avec la liste des rames (`train_id`, alias, endpoints commande/télémétrie, seuils personnalisés). Exportez ce catalogue dans le coffre-fort avant le déploiement.
+2. Lors de la première mise en service, lancez le mode d'enrôlement QR de l'application (Menu → *Ajouter un train via QR*). Chaque code doit encapsuler l'identifiant de rame, l'URL du WebSocket et l'éventuel timeout personnalisé. Scannez et validez que l'application synchronise ces données dans l'annuaire local.
+3. Pour les sites sans QR, utilisez la commande d'amorçage `adb shell am broadcast -a com.minitrain.SEED_DIRECTORY --es payload @/sdcard/minitrain/seeds.json` contenant l'export Remote Config.
+
+### Suivi opérateur pendant le déploiement
+- Affichez le tableau de bord *Connectivity* (télémétrie WebSocket + métriques `last_command_timestamp`) et conservez l'onglet *Annuaire* de l'application ouvert sur une tablette de contrôle.
+- Pendant la fenêtre de déploiement, chaque opérateur vérifie toutes les 5 minutes que les trains restent en état *Connecté* et que la dernière commande date de moins de la moitié du timeout défini. Toute dérive déclenche l'escalade vers le support réseau.
+- Activez les alertes push/Slack `train-availability` pour recevoir les transitions `DEGRADED` et `UNAVAILABLE`. Documentez les occurrences dans le rapport de déploiement.
+
 ## Vérifications et tests
-- Tests firmware : `cmake -S firmware -B firmware/build && cmake --build firmware/build && ctest --test-dir firmware/build` pour confirmer que les variables `MINITRAIN_*` sont résolues et que la pile TLS fonctionne avec les secrets injectés.
+### Firmware
+- `cmake -S firmware -B firmware/build && cmake --build firmware/build && ctest --test-dir firmware/build` pour confirmer que les variables `MINITRAIN_*` et les nouveaux `MINITRAIN_FAILSAFE_*` sont résolus et que la pile TLS/timeout fonctionne avec les secrets injectés.
+- Test manuel : injectez une commande vieillie via le simulateur pour vérifier que le fail-safe s'enclenche au nouveau seuil et que la télémétrie publie l'état d'indisponibilité.
 
+### Application Android
+- `cd android-app && gradle test` pour valider la logique réseau, OAuth2 et la propagation des seuils côté Remote Config.
+- `cd android-app && gradle connectedAndroidTest` pour établir un dialogue mTLS complet contre le serveur TLS de test et vérifier la bascule d'état *Disponible*/*Indisponible* dans l'annuaire multi-train.
 
-- Tests Android JVM : `cd android-app && gradle test` pour valider la logique réseau et OAuth2.
-
-
-- Tests d'instrumentation : `cd android-app && gradle connectedAndroidTest` pour établir un dialogue mTLS complet contre le serveur TLS de test.
-
-
+### Parc multi-train (end-to-end)
+- Instanciez au minimum deux rames et une passerelle backend sur staging. Lancez un scénario de pilotage simultané, forcez une expiration de commande sur une rame et vérifiez que seule cette rame passe en fail-safe tandis que l'autre reste contrôlable.
+- Validez que l'historique d'événements agrégé (firmware + backend + app) reflète les transitions synchronisées (`command_timeout_triggered`, `pilot_release_started`, `train_state=AVAILABLE/UNAVAILABLE`).
+- Terminez par un redémarrage de l'application mobile pour confirmer que l'annuaire se resynchronise automatiquement et que les seuils de timeout se réappliquent à la reconnexion.
 
 ## Annexes
 ### `scripts/provisioning/generate-fw-credentials.sh`
