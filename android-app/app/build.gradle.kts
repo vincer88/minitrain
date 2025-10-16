@@ -17,6 +17,7 @@ android {
 
     buildFeatures {
         buildConfig = true
+        compose = true
     }
 
     compileOptions {
@@ -28,12 +29,18 @@ android {
         jvmTarget = "17"
     }
 
+    composeOptions {
+        kotlinCompilerExtensionVersion = "1.5.15"
+    }
+
     testOptions {
         unitTests.isIncludeAndroidResources = true
     }
 }
 
 dependencies {
+    val composeBom = platform("androidx.compose:compose-bom:2024.09.02")
+
     implementation("org.jetbrains.kotlin:kotlin-stdlib")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
@@ -47,9 +54,17 @@ dependencies {
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
     implementation("androidx.media3:media3-exoplayer:1.4.1")
     implementation("androidx.media3:media3-ui:1.4.1")
+    implementation("androidx.activity:activity-compose:1.9.3")
+    implementation(composeBom)
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.foundation:foundation")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.ui:ui-tooling-preview")
 
     testImplementation(kotlin("test"))
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
 
+    androidTestImplementation(composeBom)
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
     androidTestImplementation("androidx.test:runner:1.5.2")
     androidTestImplementation("androidx.test:rules:1.5.0")
@@ -58,4 +73,8 @@ dependencies {
     androidTestImplementation("com.squareup.okhttp3:okhttp-tls:4.12.0")
     androidTestImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
     androidTestImplementation("io.ktor:ktor-client-okhttp:2.3.12")
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    debugImplementation(composeBom)
+    debugImplementation("androidx.compose.ui:ui-tooling")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

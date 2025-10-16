@@ -75,3 +75,28 @@ data class ControlState(
     val emergencyStop: Boolean
 )
 
+@Serializable
+data class TrainEndpoint(
+    val id: String,
+    val name: String,
+    val commandEndpoint: String,
+    val videoEndpoint: String? = null
+)
+
+@Serializable
+data class TrainConnectionStatus(
+    val isConnected: Boolean = false,
+    val isAvailable: Boolean = true
+)
+
+@Serializable
+data class TrainDirectoryEntry(
+    val endpoint: TrainEndpoint,
+    val status: TrainConnectionStatus = TrainConnectionStatus()
+)
+
+@Serializable
+data class TrainDirectory(
+    val trains: List<TrainDirectoryEntry> = emptyList()
+)
+
