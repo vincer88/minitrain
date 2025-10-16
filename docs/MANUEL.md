@@ -189,46 +189,43 @@ La page d’accueil présente une **liste simple** des rames enregistrées. Chaq
 
 ### 5.1 Gestion des trains
 
-- **Ajouter** : bouton *Ajouter un train* ouvrant un dialogue minimal (UUID, alias, URL commande, URL vidéo). L’entrée apparaît aussitôt dans la liste.
-- **Retirer** : menu *⋮* > *Supprimer* coupe la session WebSocket, supprime les secrets et retire l’item.
-- **Réordonner** : un glisser-déposer reste disponible pour prioriser les rames critiques (ordre persistant).
+- **Ajouter** : le bouton *Ajouter un train* crée immédiatement une rame de démonstration avec un identifiant généré. Aucun dialogue n’est présenté ; l’alias peut être ajusté ensuite dans l’interface.
+- **Contrôler** : l’action *Contrôler* passe la rame en mode actif et ouvre la surimpression cabine.
+- **Supprimer** : l’action *Supprimer* retire l’élément de la liste et libère les ressources associées.
+
+> Aucun glisser-déposer ni personnalisation avancée n’est proposé pour l’instant ; l’ordre reste celui d’ajout.
 
 ### 5.2 Indicateurs de connexion et disponibilité
 
-Les états se matérialisent par un pictogramme circulaire et une pastille texte adjacente :
+Chaque ligne de la liste comporte une pastille texte qui bascule automatiquement entre trois statuts :
 
-- 🟢 `Connecté` : télémétrie < `T₁`.
-- 🟠 `Fail-safe` : rampe active (`T₁`), jauge circulaire indiquant la progression.
-- 🔴 `Relâché` : aucune commande valide depuis `T₂`.
-- ⚪ `Déconnecté` : perte réseau.
-- `Disponible` / `Réservé` / `Verrouillé (fail-safe)` s’affichent dans la pastille pour refléter l’état d’occupation.
+- `Disponible` : aucune session n’est active, l’action *Contrôler* est accessible.
+- `En cours` : la rame est contrôlée par l’opérateur local et la surimpression est ouverte.
+- `Perdu` : la dernière commande remonte à plus de `T₂` secondes ou la connexion WebSocket est tombée.
 
-Lorsque `T₂` est atteint, la pastille revient à `Disponible` et le bouton *Activer* réapparaît automatiquement. Une notification toast informe l’opérateur que la session a été relâchée.
+Un toast prévient l’opérateur lorsqu’un train repasse à l’état `Disponible` après une perte de connexion. Aucun code couleur ni jauge n’est actuellement affiché.
 
 ### 5.3 Activation de la cabine
 
-1. Taper sur *Activer* ouvre la **surimpression cabine** : le flux vidéo de l’ESP32 occupe l’arrière-plan.
-2. Un **manipulateur circulaire** (Compose) se superpose pour régler vitesse et direction (glisser vers l’avant/arrière).
-3. Des **sélecteurs textuels** apparaissent sur le côté droit pour les actions rapides : *Feux auto*, *Relâcher*, *Profil lent/rapide*.
-4. Un bandeau supérieur rappelle l’état du train, la qualité du flux vidéo et propose *Retour à la liste*.
+1. Appuyer sur *Contrôler* affiche la surimpression cabine, un panneau semi-transparent couvrant l’écran.
+2. Un **slider horizontal** ajuste la vitesse. La valeur courante est reflétée immédiatement dans la télémétrie.
+3. Deux **puces** `Direction` et `Cabine` permettent d’inverser le sens de marche et d’alterner l’angle de vue associé.
+4. Le bandeau supérieur confirme la connexion. Un bouton *Fermer* restaure la liste sans autre dialogue.
 
 ### 5.4 Déroulé utilisateur
 
-1. **Sélection** : choisir une rame `Disponible` dans la liste.
-2. **Activation** : l’app réclame le verrou mTLS, passe la rame en `Réservé` et affiche la cabine.
-3. **Pilotage** : utiliser le manipulateur pour ajuster vitesse et sens ; les boutons textuels modifient les auxiliaires.
-4. **Perte de disponibilité** : si `fail_safe` s’active ou qu’un autre opérateur libère la rame, la surimpression affiche une alerte et désactive les contrôles.
-5. **Retour** : valider l’alerte renvoie automatiquement à la liste avec le train marqué `Relâché`. L’opérateur peut immédiatement choisir une autre rame.
+1. **Sélection** : utiliser *Ajouter un train* si nécessaire, puis choisir une rame `Disponible`.
+2. **Contrôle** : cliquer sur *Contrôler* ouvre la surimpression et réserve la rame.
+3. **Pilotage** : régler la vitesse via le slider et modifier le sens avec la puce `Direction`. Les changements sont appliqués sans étape intermédiaire.
+4. **Fin de session** : fermer la surimpression ramène à la liste. En cas de déconnexion (`Perdu`), la rame redevient `Disponible` automatiquement dès que la liaison revient.
+
+> La personnalisation avancée de la cabine (habillages dédiés, overlays spécifiques) est planifiée pour une mise à jour ultérieure.
 
 ### 5.5 Configuration des visuels cabine
 
-Les overlays et manipulateurs sont gérés via `android-app/app/src/main/assets/cabs.json` et les ressources associées :
+La cabine s’appuie aujourd’hui sur un habillage générique commun à toutes les rames. Aucun fichier `cabs.json`, overlay dédié ou flux vidéo spécifique n’est nécessaire.
 
-1. Déposer les overlays PNG dans `res/drawable/cab/`.
-2. Associer `overlay`, `manipulator` et `videoUrl` dans `cabs.json` pour chaque `trainId`.
-3. Redémarrer l’application (ou *hot reload* Compose) pour charger la configuration.
-
-> **Flux vidéo ESP32** : chaque entrée `videoUrl` doit pointer vers le flux MJPEG/RTSP sécurisé. En développement, utilisez `scripts/mock_video_server.py --source assets/sample.mp4` puis définissez `http://127.0.0.1:8088/stream.mjpeg` pour valider les tests.
+> Une personnalisation complète (visuels par rame, paramètres de flux, commandes additionnelles) est prévue pour une version ultérieure. Les modalités de configuration seront documentées lorsqu’elles seront disponibles.
 
 ## 6. Intégration continue (optionnel)
 

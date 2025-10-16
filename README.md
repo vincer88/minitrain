@@ -9,14 +9,15 @@ Ce projet contient une implémentation complète d'un système de pilotage pour 
 
 ## Vue opérateur
 
-La vue opérateur se compose de deux écrans complémentaires :
+La vue opérateur se concentre sur deux étapes simples :
 
-1. **Sélection d'un train** – liste verticale minimaliste de rames disponibles. Chaque entrée affiche l'alias, l'état courant et expose deux boutons texte (*Activer* et *Détails*) pour engager la cabine ou consulter la télémétrie. Les états se mettent à jour en temps réel via la télémétrie agrégée.
-2. **Cabine immersive** – après sélection, une surimpression plein écran affiche :
-   - Le flux vidéo cabine (ESP32) en arrière-plan.
-   - Un manipulateur virtuel (curseur circulaire) permettant de moduler vitesse et sens via gestes.
-   - Des sélecteurs contextuels (feux, relâchement, profil de vitesse) accessibles en surcouche.
-   - Un bandeau indiquant la connexion et une action *Retour* vers la liste si la disponibilité est perdue.
+1. **Liste des trains** – un bouton *Ajouter un train* pré-rempli permet de renseigner rapidement une rame de démonstration. Chaque ligne affiche l'alias détecté, l'état courant et les actions *Contrôler* / *Supprimer*.
+2. **Cabine** – lorsque *Contrôler* est activé, une surimpression plein écran s'affiche au-dessus de la liste :
+   - un slider horizontal ajuste la vitesse instantanée ;
+   - deux puces « Direction » et « Cabine » servent à inverser le sens ou basculer la vue embarquée ;
+   - un bandeau supérieur rappelle la connexion et propose le retour à la liste.
+
+La surimpression actuelle reste volontairement sobre : un panneau semi-transparent recouvre l'écran pour mettre en avant les contrôles, sans éléments graphiques complexes.
 
 ## Prérequis
 
@@ -37,48 +38,14 @@ ctest --test-dir firmware/build
 
 ```bash
 cd android-app
-gradle test
-gradle connectedAndroidTest # instrumentation TLS/mTLS
-gradle :app:connectedComposeDebugAndroidTest # tests UI Compose de la vue cabine
+./gradlew test
 ```
 
-> **Prérequis UI** : fournir un endpoint vidéo de test (ESP32 ou mock HLS/RTSP) accessible localement et référencé dans `local.properties` (`cab.video.previewUrl=`) pour que les tests de la vue cabine valident les états « flux disponible/perdu ».
+Les captures d'écran éventuelles sont réalisées manuellement depuis l'émulateur ou un appareil physique ; aucun script automatisé n'est fourni à ce stade.
 
-Les nouveaux tests Compose instrumentés (`TrainControlScreenTest`) pilotent la glissière de vitesse, les boutons de direction et la sélection de cabine, tout en vérifiant les interactions avec `TrainViewModel`. Ils capturent également les overlays vidéo (buffering/erreur) et génèrent des captures d'écran enregistrées sur l'appareil sous `Android/data/com.minitrain/files/reports/screenshots`. Après exécution, rapatriez-les localement dans `android-app/app/build/reports/screenshots/` avec :
+## Personnalisation des cabines (à venir)
 
-```bash
-adb pull /sdcard/Android/data/com.minitrain/files/reports/screenshots android-app/app/build/reports/screenshots/
-```
-
-## Configuration des visuels cabine et flux vidéo
-
-Les visuels de cabine sont stockés dans `android-app/app/src/main/res/drawable/cab/` et `android-app/app/src/main/res/raw/overlays/`. Pour chaque rame, associez un identifiant de ressource dans `android-app/app/src/main/assets/cabs.json` :
-
-```json
-[
-  {
-    "trainId": "urn:train:alpha",
-    "overlay": "cab_alpha.png",
-    "manipulator": "manipulator_default.json"
-  }
-]
-```
-
-L'application charge dynamiquement l'overlay selon `trainId`. Les overlays manquants retombent sur `manipulator_default`. Pour ajouter un visuel :
-
-1. Déposez le fichier graphique dans `res/drawable/cab/` (PNG 9-patch recommandé).
-2. Référencez-le dans `cabs.json` avec le même `trainId` que celui du backend.
-3. Redémarrez l'application ou déclenchez un *hot reload* Compose pour l'appliquer.
-
-Le flux vidéo cabine provient de l'ESP32 diffusant en MJPEG ou RTSP. Configurez l'URL par rame dans `cabs.json` via la clé `videoUrl`. En environnement de développement, un simulateur (`scripts/mock_video_server.py`) peut générer un flux HLS de test :
-
-```bash
-python scripts/mock_video_server.py --source assets/sample.mp4 --port 8088
-```
-
-Renseignez ensuite `videoUrl` vers `http://127.0.0.1:8088/stream.mjpeg`. En production, l'ESP32 doit exposer un endpoint TLS et authentifié.
-
-Les tests valident l'ensemble des comportements critiques : PID, agrégateur de télémétrie, traitement des commandes, logique de ViewModel et interactions réseau simulées. Les tests d'instrumentation démarrent un serveur TLS auto-signé pour vérifier l'établissement d'une session WebSocket mTLS.
+La possibilité de sélectionner des habillages cabine dédiés (visuels, flux associés, commandes spécifiques) sera ajoutée dans une prochaine version. En attendant, l'application propose un ensemble commun de contrôles et un habillage générique.
 
 ## Provisionnement des secrets et rotation
 
