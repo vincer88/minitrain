@@ -75,6 +75,7 @@ dependencies {
     androidTestImplementation("com.squareup.okhttp3:okhttp-tls:4.12.0")
     androidTestImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
     androidTestImplementation("io.ktor:ktor-client-okhttp:2.3.12")
+    androidTestImplementation("io.mockk:mockk-android:1.13.11")
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     debugImplementation(composeBom)
     debugImplementation("androidx.compose.ui:ui-tooling")
