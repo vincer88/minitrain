@@ -2,40 +2,21 @@
 
 #include "minitrain/train_controller.hpp"
 
-#include <algorithm>
 #include <cstring>
 #include <stdexcept>
 
 namespace minitrain {
-namespace {
-
-float readFloatLE(const std::vector<std::uint8_t> &payload) {
-    if (payload.size() < sizeof(float)) {
-        throw std::invalid_argument("Payload too small for float");
-    }
-    float value;
-    std::memcpy(&value, payload.data(), sizeof(float));
-#if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
-    auto *bytes = reinterpret_cast<std::uint8_t *>(&value);
-    std::reverse(bytes, bytes + sizeof(float));
-#endif
-    return value;
-}
-
-} // namespace
-
 CommandProcessor::CommandProcessor(TrainController &controller, std::optional<LegacyParser> legacyParser)
     : controller_(controller), legacyParser_(std::move(legacyParser)) {}
 
 CommandResult CommandProcessor::processFrame(const CommandFrame &frame, std::chrono::steady_clock::time_point arrival) {
-    if (frame.header.payloadType != static_cast<std::uint16_t>(CommandPayloadType::Command) &&
-        frame.header.payloadType != static_cast<std::uint16_t>(CommandPayloadType::LegacyText)) {
-        return {false, "Unsupported payload type"};
-    }
-
-    const std::uint8_t lightsMask = frame.header.lightsOverride;
-    const bool telemetryOnly = (frame.header.lightsFlags & 0x80U) != 0;
+    const bool telemetryOnly = (frame.header.lightsOverride & 0x80U) != 0;
+    const std::uint8_t lightsMask = static_cast<std::uint8_t>(frame.header.lightsOverride & 0x7FU);
     controller_.setLightsOverride(lightsMask, telemetryOnly);
+
+    if (telemetryOnly) {
+        return {true, "Telemetry frame"};
+    }
 
     if (lastArrival_) {
         const auto delta = arrival - *lastArrival_;
@@ -49,77 +30,46 @@ CommandResult CommandProcessor::processFrame(const CommandFrame &frame, std::chr
     }
     lastArrival_ = arrival;
 
-    auto remoteTimestamp = frame.header.timestampNanoseconds == 0
+    auto remoteTimestamp = frame.header.timestampMicros == 0
                                ? arrival
                                : std::chrono::steady_clock::time_point{
-                                     std::chrono::steady_clock::duration{
-                                         std::chrono::nanoseconds{frame.header.timestampNanoseconds}}};
+                                     std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                                         std::chrono::microseconds{frame.header.timestampMicros})};
 
-    if (frame.header.payloadType == static_cast<std::uint16_t>(CommandPayloadType::LegacyText)) {
-        controller_.registerCommandTimestamp(remoteTimestamp);
-        return handleLegacyPayload(frame.payload);
+    controller_.setTargetSpeed(frame.header.targetSpeedMetersPerSecond);
+    controller_.setDirection(frame.header.direction);
+
+    std::uint8_t controlFlags = frame.payload.empty() ? 0 : frame.payload.front();
+    if (lightsMask == 0x00U) {
+        controller_.toggleHeadlights((controlFlags & 0x01U) != 0);
+    }
+    controller_.toggleHorn((controlFlags & 0x02U) != 0);
+    const bool emergency = (controlFlags & 0x04U) != 0;
+    if (emergency) {
+        controller_.triggerEmergencyStop();
     }
 
-    const auto payload = parsePayload(frame.payload);
     controller_.registerCommandTimestamp(remoteTimestamp);
-    return handlePayload(payload);
+
+    if (!emergency && frame.payload.size() > 1 && legacyParser_) {
+        std::vector<std::uint8_t> legacyPayload(frame.payload.begin() + 1, frame.payload.end());
+        auto legacyResult = handleLegacyPayload(legacyPayload);
+        if (!legacyResult.success) {
+            return legacyResult;
+        }
+        if (!legacyResult.message.empty()) {
+            return legacyResult;
+        }
+    }
+
+    if (emergency) {
+        return {true, "Emergency stop"};
+    }
+
+    return {true, "State updated"};
 }
 
 bool CommandProcessor::lowFrequencyFallbackActive() const { return lowFrequencyFallback_; }
-
-CommandResult CommandProcessor::handlePayload(const BinaryCommandPayload &payload) {
-    switch (payload.kind) {
-    case CommandKind::SetSpeed: {
-        float speed = readFloatLE(payload.data);
-        controller_.setTargetSpeed(speed);
-        return {true, "Speed updated"};
-    }
-    case CommandKind::SetDirection: {
-        if (payload.data.empty()) {
-            return {false, "Missing direction payload"};
-        }
-        const auto code = payload.data.front();
-        Direction direction;
-        switch (code) {
-        case 0:
-            direction = Direction::Neutral;
-            break;
-        case 1:
-            direction = Direction::Forward;
-            break;
-        case 2:
-            direction = Direction::Reverse;
-            break;
-        default:
-            return {false, "Unknown direction code"};
-        }
-        controller_.setDirection(direction);
-        return {true, "Direction updated"};
-    }
-    case CommandKind::ToggleHeadlights: {
-        if (payload.data.empty()) {
-            return {false, "Missing headlight payload"};
-        }
-        controller_.toggleHeadlights(payload.data.front() != 0);
-        return {true, "Headlights toggled"};
-    }
-    case CommandKind::ToggleHorn: {
-        if (payload.data.empty()) {
-            return {false, "Missing horn payload"};
-        }
-        controller_.toggleHorn(payload.data.front() != 0);
-        return {true, "Horn toggled"};
-    }
-    case CommandKind::EmergencyStop: {
-        controller_.triggerEmergencyStop();
-        return {true, "Emergency stop"};
-    }
-    case CommandKind::Legacy:
-        return handleLegacyPayload(payload.data);
-    default:
-        return {false, "Unknown command kind"};
-    }
-}
 
 CommandResult CommandProcessor::handleLegacyPayload(const std::vector<std::uint8_t> &payload) {
     if (!legacyParser_) {
@@ -127,16 +77,6 @@ CommandResult CommandProcessor::handleLegacyPayload(const std::vector<std::uint8
     }
     std::string text(payload.begin(), payload.end());
     return (*legacyParser_)(text);
-}
-
-BinaryCommandPayload CommandProcessor::parsePayload(const std::vector<std::uint8_t> &payload) const {
-    if (payload.empty()) {
-        throw std::invalid_argument("Empty payload");
-    }
-    BinaryCommandPayload result;
-    result.kind = static_cast<CommandKind>(payload.front());
-    result.data.assign(payload.begin() + 1, payload.end());
-    return result;
 }
 
 } // namespace minitrain

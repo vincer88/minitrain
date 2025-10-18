@@ -102,7 +102,7 @@ class CommandChannelClientTest {
             targetSpeedMetersPerSecond = 0f,
             direction = Direction.FORWARD,
             lightsOverride = 0x80.toByte(),
-            auxiliaryPayloadSize = payload.size
+            auxiliaryPayloadLength = payload.size
         )
         return CommandFrameSerializer.encode(CommandFrame(header, payload))
     }

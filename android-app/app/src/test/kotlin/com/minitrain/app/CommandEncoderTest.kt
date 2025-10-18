@@ -82,7 +82,7 @@ class CommandEncoderTest {
         assertEquals(3.5f, header.targetSpeedMetersPerSecond)
         assertEquals(Direction.FORWARD, header.direction)
         assertEquals(0x01.toByte(), header.lightsOverride)
-        assertEquals(4, header.auxiliaryPayloadSize)
+        assertEquals(4, header.auxiliaryPayloadLength)
         assertEquals(10_000_005L, header.timestampMicros)
     }
 }

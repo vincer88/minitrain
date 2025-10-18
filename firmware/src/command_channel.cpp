@@ -61,6 +61,31 @@ std::uint32_t littleToHost32(std::uint32_t value) { return hostToLittle32(value)
 
 std::uint64_t littleToHost64(std::uint64_t value) { return hostToLittle64(value); }
 
+std::uint8_t encodeDirection(Direction direction) {
+    switch (direction) {
+    case Direction::Neutral:
+        return 0U;
+    case Direction::Forward:
+        return 1U;
+    case Direction::Reverse:
+        return 2U;
+    }
+    return 0U;
+}
+
+Direction decodeDirection(std::uint8_t code) {
+    switch (code) {
+    case 0U:
+        return Direction::Neutral;
+    case 1U:
+        return Direction::Forward;
+    case 2U:
+        return Direction::Reverse;
+    default:
+        return Direction::Neutral;
+    }
+}
+
 } // namespace
 
 CommandChannel::CommandChannel(Config config, std::unique_ptr<WebSocketClient> client, CommandProcessor &processor)
@@ -94,13 +119,13 @@ void CommandChannel::publishTelemetry(const TelemetrySample &sample, std::uint32
                                  ? config_.sessionId
                                  : sample.sessionId;
     frame.header.sequence = sample.sequence != 0 ? sample.sequence : sequence;
-    const auto timestampFallback = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                              std::chrono::steady_clock::now().time_since_epoch())
-                                              .count());
-    frame.header.timestampNanoseconds = sample.commandTimestamp != 0 ? sample.commandTimestamp : timestampFallback;
-    frame.header.payloadType = static_cast<std::uint16_t>(CommandPayloadType::Heartbeat);
-    frame.header.lightsOverride = sample.lightsOverrideMask;
-    frame.header.lightsFlags = sample.lightsTelemetryOnly ? 0x80U : 0x00U;
+    const auto timestampFallback = static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count());
+    frame.header.timestampMicros = sample.commandTimestamp != 0 ? sample.commandTimestamp : timestampFallback;
+    frame.header.targetSpeedMetersPerSecond = sample.appliedSpeedMetersPerSecond;
+    frame.header.direction = sample.appliedDirection;
+    const std::uint8_t telemetryFlag = sample.lightsTelemetryOnly ? 0x80U : 0x00U;
+    frame.header.lightsOverride = static_cast<std::uint8_t>((sample.lightsOverrideMask & 0x7FU) | telemetryFlag);
     frame.payload.resize(sizeof(float) * 12);
 
     auto encodeFloat = [](float value, std::uint8_t *out) {
@@ -124,45 +149,91 @@ void CommandChannel::publishTelemetry(const TelemetrySample &sample, std::uint32
     encodeFloat(static_cast<float>(sample.appliedDirection), payload + 10 * sizeof(float));
     encodeFloat(static_cast<float>(sample.source), payload + 11 * sizeof(float));
 
+    frame.header.auxPayloadLength = static_cast<std::uint16_t>(frame.payload.size());
     client_->sendBinary(encodeFrame(frame));
 }
 
 std::vector<std::uint8_t> CommandChannel::encodeFrame(const CommandFrame &frame) {
-    const std::size_t totalSize = sizeof(CommandFrameHeader) + frame.payload.size();
+    const std::size_t totalSize = kCommandFrameHeaderSize + frame.payload.size();
     std::vector<std::uint8_t> buffer(totalSize);
 
-    CommandFrameHeader header = frame.header;
-    header.sequence = hostToLittle32(header.sequence);
-    header.timestampNanoseconds = hostToLittle64(header.timestampNanoseconds);
-    header.payloadType = hostToLittle16(header.payloadType);
-    header.payloadSize = hostToLittle16(static_cast<std::uint16_t>(frame.payload.size()));
+    std::uint8_t *out = buffer.data();
+    std::memcpy(out, frame.header.sessionId.data(), frame.header.sessionId.size());
+    out += frame.header.sessionId.size();
 
-    std::memcpy(buffer.data(), &header, sizeof(CommandFrameHeader));
+    const std::uint32_t sequence = hostToLittle32(frame.header.sequence);
+    std::memcpy(out, &sequence, sizeof(sequence));
+    out += sizeof(sequence);
+
+    const std::uint64_t timestamp = hostToLittle64(frame.header.timestampMicros);
+    std::memcpy(out, &timestamp, sizeof(timestamp));
+    out += sizeof(timestamp);
+
+    static_assert(sizeof(float) == sizeof(std::uint32_t), "Unexpected float size");
+    std::uint32_t speedBits;
+    std::memcpy(&speedBits, &frame.header.targetSpeedMetersPerSecond, sizeof(float));
+    speedBits = hostToLittle32(speedBits);
+    std::memcpy(out, &speedBits, sizeof(speedBits));
+    out += sizeof(speedBits);
+
+    const std::uint8_t direction = encodeDirection(frame.header.direction);
+    *out++ = direction;
+
+    *out++ = frame.header.lightsOverride;
+
+    const std::uint16_t auxLength = hostToLittle16(static_cast<std::uint16_t>(frame.payload.size()));
+    std::memcpy(out, &auxLength, sizeof(auxLength));
+    out += sizeof(auxLength);
+
     if (!frame.payload.empty()) {
-        std::memcpy(buffer.data() + sizeof(CommandFrameHeader), frame.payload.data(), frame.payload.size());
+        std::memcpy(out, frame.payload.data(), frame.payload.size());
     }
     return buffer;
 }
 
 CommandFrame CommandChannel::decodeFrame(const std::vector<std::uint8_t> &buffer) {
-    if (buffer.size() < sizeof(CommandFrameHeader)) {
+    if (buffer.size() < kCommandFrameHeaderSize) {
         throw std::invalid_argument("Buffer too small for command frame");
     }
     CommandFrame frame{};
-    std::memcpy(&frame.header, buffer.data(), sizeof(CommandFrameHeader));
-    frame.header.sequence = littleToHost32(frame.header.sequence);
-    frame.header.timestampNanoseconds = littleToHost64(frame.header.timestampNanoseconds);
-    frame.header.payloadType = littleToHost16(frame.header.payloadType);
-    frame.header.payloadSize = littleToHost16(frame.header.payloadSize);
+    const std::uint8_t *in = buffer.data();
+    std::memcpy(frame.header.sessionId.data(), in, frame.header.sessionId.size());
+    in += frame.header.sessionId.size();
 
-    const std::size_t expectedSize = sizeof(CommandFrameHeader) + frame.header.payloadSize;
+    std::uint32_t sequence;
+    std::memcpy(&sequence, in, sizeof(sequence));
+    frame.header.sequence = littleToHost32(sequence);
+    in += sizeof(sequence);
+
+    std::uint64_t timestamp;
+    std::memcpy(&timestamp, in, sizeof(timestamp));
+    frame.header.timestampMicros = littleToHost64(timestamp);
+    in += sizeof(timestamp);
+
+    std::uint32_t speedBits;
+    std::memcpy(&speedBits, in, sizeof(speedBits));
+    speedBits = littleToHost32(speedBits);
+    std::memcpy(&frame.header.targetSpeedMetersPerSecond, &speedBits, sizeof(speedBits));
+    in += sizeof(speedBits);
+
+    const std::uint8_t directionCode = *in++;
+    frame.header.direction = decodeDirection(directionCode);
+
+    frame.header.lightsOverride = *in++;
+
+    std::uint16_t auxLength;
+    std::memcpy(&auxLength, in, sizeof(auxLength));
+    frame.header.auxPayloadLength = littleToHost16(auxLength);
+    in += sizeof(auxLength);
+
+    const std::size_t expectedSize = kCommandFrameHeaderSize + frame.header.auxPayloadLength;
     if (buffer.size() < expectedSize) {
         throw std::invalid_argument("Incomplete payload");
     }
 
-    frame.payload.resize(frame.header.payloadSize);
-    if (frame.header.payloadSize > 0) {
-        std::memcpy(frame.payload.data(), buffer.data() + sizeof(CommandFrameHeader), frame.payload.size());
+    frame.payload.resize(frame.header.auxPayloadLength);
+    if (frame.header.auxPayloadLength > 0) {
+        std::memcpy(frame.payload.data(), in, frame.payload.size());
     }
 
     return frame;
