@@ -21,7 +21,8 @@ enum class LightsState {
     FRONT_WHITE_REAR_RED,
     FRONT_RED_REAR_WHITE,
     BOTH_OFF,
-    BOTH_WHITE
+    BOTH_WHITE,
+    BOTH_RED_FLASHING
 }
 
 @Serializable

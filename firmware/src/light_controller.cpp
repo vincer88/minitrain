@@ -76,6 +76,12 @@ void LightController::applyAutomaticLogic(TrainState &state) {
         return;
     }
 
+    if (state.pilotReleaseActive) {
+        state.lightsState = LightsState::BothRedFlashing;
+        state.lightsSource = LightsSource::Automatic;
+        return;
+    }
+
     const auto baseColors = computeAutomatic(state);
     auto colors = baseColors;
     auto mask = static_cast<std::uint8_t>(state.lightsOverrideMask & 0x0F);

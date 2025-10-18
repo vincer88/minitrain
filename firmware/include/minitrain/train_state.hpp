@@ -23,7 +23,8 @@ enum class LightsState : std::uint8_t {
     FrontWhiteRearRed = 1,
     FrontRedRearWhite = 2,
     BothOff = 3,
-    BothWhite = 4
+    BothWhite = 4,
+    BothRedFlashing = 5
 };
 
 enum class LightsSource : std::uint8_t {

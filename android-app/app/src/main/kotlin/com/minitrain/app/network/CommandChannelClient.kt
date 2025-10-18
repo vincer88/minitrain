@@ -354,6 +354,7 @@ class CommandChannelClient(
         2 -> LightsState.FRONT_RED_REAR_WHITE
         3 -> LightsState.BOTH_OFF
         4 -> LightsState.BOTH_WHITE
+        5 -> LightsState.BOTH_RED_FLASHING
         else -> LightsState.BOTH_RED
     }
 
