@@ -14,7 +14,7 @@ data class CommandFrameHeader(
     val targetSpeedMetersPerSecond: Float,
     val direction: Direction,
     val lightsOverride: Byte,
-    val auxiliaryPayloadSize: Int
+    val auxiliaryPayloadLength: Int
 )
 
 data class CommandFrame(val header: CommandFrameHeader, val payload: ByteArray)
@@ -23,7 +23,7 @@ object CommandFrameSerializer {
     private const val HEADER_SIZE = 16 + 4 + 8 + 4 + 1 + 1 + 2
 
     fun encode(frame: CommandFrame): ByteArray {
-        if (frame.payload.size != frame.header.auxiliaryPayloadSize) {
+        if (frame.payload.size != frame.header.auxiliaryPayloadLength) {
             throw IllegalArgumentException("Payload length mismatch")
         }
         val buffer = ByteBuffer.allocate(HEADER_SIZE + frame.payload.size)
@@ -34,7 +34,7 @@ object CommandFrameSerializer {
         buffer.putFloat(frame.header.targetSpeedMetersPerSecond)
         buffer.put(directionToProtocol(frame.header.direction))
         buffer.put(frame.header.lightsOverride)
-        buffer.putShort(frame.header.auxiliaryPayloadSize.toShort())
+        buffer.putShort(frame.header.auxiliaryPayloadLength.toShort())
         buffer.put(frame.payload)
         return buffer.array()
     }
@@ -51,15 +51,15 @@ object CommandFrameSerializer {
         val targetSpeed = byteBuffer.float
         val directionCode = byteBuffer.get()
         val lightsOverride = byteBuffer.get()
-        val payloadSize = byteBuffer.short.toInt() and 0xFFFF
-        if (buffer.size < HEADER_SIZE + payloadSize) {
+        val payloadLength = byteBuffer.short.toInt() and 0xFFFF
+        if (buffer.size < HEADER_SIZE + payloadLength) {
             throw IllegalArgumentException("Incomplete payload")
         }
-        val payload = ByteArray(payloadSize)
+        val payload = ByteArray(payloadLength)
         byteBuffer.get(payload)
         val direction = protocolToDirection(directionCode)
         return CommandFrame(
-            CommandFrameHeader(sessionId, sequence, timestamp, targetSpeed, direction, lightsOverride, payloadSize),
+            CommandFrameHeader(sessionId, sequence, timestamp, targetSpeed, direction, lightsOverride, payloadLength),
             payload
         )
     }
@@ -93,10 +93,10 @@ fun buildHeader(
     targetSpeed: Double,
     direction: Direction,
     lightsOverride: Byte = 0,
-    payloadSize: Int
+    payloadLength: Int
 ): CommandFrameHeader {
     require(sessionId.size == 16) { "Session identifier must be 16 bytes" }
-    require(payloadSize in 0..0xFFFF) { "Payload too large" }
+    require(payloadLength in 0..0xFFFF) { "Payload too large" }
     val micros = timestamp.epochSecond * 1_000_000L + timestamp.nano / 1_000
     return CommandFrameHeader(
         sessionId = sessionId,
@@ -105,7 +105,7 @@ fun buildHeader(
         targetSpeedMetersPerSecond = targetSpeed.toFloat(),
         direction = direction,
         lightsOverride = lightsOverride,
-        auxiliaryPayloadSize = payloadSize
+        auxiliaryPayloadLength = payloadLength
     )
 }
 
@@ -147,7 +147,7 @@ fun buildStateFrames(
         targetSpeed = state.targetSpeed,
         direction = state.direction,
         lightsOverride = computedLightsOverride,
-        payloadSize = payload.size
+        payloadLength = payload.size
     )
     return CommandFrame(header, payload)
 }

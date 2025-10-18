@@ -11,6 +11,8 @@
 #include <string>
 #include <vector>
 
+#include "minitrain/train_state.hpp"
+
 namespace minitrain {
 
 class CommandProcessor;
@@ -19,18 +21,14 @@ struct TelemetrySample;
 struct CommandFrameHeader {
     std::array<std::uint8_t, 16> sessionId{};
     std::uint32_t sequence{0};
-    std::uint64_t timestampNanoseconds{0};
-    std::uint16_t payloadType{0};
-    std::uint16_t payloadSize{0};
+    std::uint64_t timestampMicros{0};
+    float targetSpeedMetersPerSecond{0.0F};
+    Direction direction{Direction::Neutral};
     std::uint8_t lightsOverride{0};
-    std::uint8_t lightsFlags{0};
+    std::uint16_t auxPayloadLength{0};
 };
 
-enum class CommandPayloadType : std::uint16_t {
-    Command = 0x0001,
-    LegacyText = 0x00FE,
-    Heartbeat = 0x00FF,
-};
+constexpr std::size_t kCommandFrameHeaderSize = 16 + 4 + 8 + 4 + 1 + 1 + 2;
 
 struct CommandFrame {
     CommandFrameHeader header;

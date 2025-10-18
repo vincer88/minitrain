@@ -13,22 +13,16 @@
 namespace minitrain::tests {
 namespace {
 
-std::vector<std::uint8_t> encodeFloat(float value) {
-    std::uint32_t bits;
-    std::memcpy(&bits, &value, sizeof(float));
-#if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
-    bits = ((bits & 0x000000FFU) << 24U) | ((bits & 0x0000FF00U) << 8U) | ((bits & 0x00FF0000U) >> 8U) |
-           ((bits & 0xFF000000U) >> 24U);
-#endif
-    return {static_cast<std::uint8_t>(bits & 0xFFU), static_cast<std::uint8_t>((bits >> 8U) & 0xFFU),
-            static_cast<std::uint8_t>((bits >> 16U) & 0xFFU), static_cast<std::uint8_t>((bits >> 24U) & 0xFFU)};
-}
-
-CommandFrame makeFrame(CommandKind kind, const std::vector<std::uint8_t> &payload) {
+CommandFrame makeFrame(float speed, Direction direction, std::uint8_t lightsOverride,
+                       std::uint8_t controlFlags = 0,
+                       const std::vector<std::uint8_t> &aux = {}) {
     CommandFrame frame;
-    frame.header.payloadType = static_cast<std::uint16_t>(CommandPayloadType::Command);
-    frame.payload.push_back(static_cast<std::uint8_t>(kind));
-    frame.payload.insert(frame.payload.end(), payload.begin(), payload.end());
+    frame.header.targetSpeedMetersPerSecond = speed;
+    frame.header.direction = direction;
+    frame.header.lightsOverride = lightsOverride;
+    frame.payload.push_back(controlFlags);
+    frame.payload.insert(frame.payload.end(), aux.begin(), aux.end());
+    frame.header.auxPayloadLength = static_cast<std::uint16_t>(frame.payload.size());
     return frame;
 }
 
@@ -45,7 +39,7 @@ int runCommandProcessorTests() {
     const auto baseTime = std::chrono::steady_clock::now();
 
     {
-        auto frame = makeFrame(CommandKind::SetSpeed, encodeFloat(2.5F));
+        auto frame = makeFrame(2.5F, Direction::Neutral, 0x00U);
         auto result = processor.processFrame(frame, baseTime);
         if (!result.success || controller.state().targetSpeed != 2.5F) {
             std::cerr << "SetSpeed command failed" << std::endl;
@@ -54,8 +48,7 @@ int runCommandProcessorTests() {
     }
 
     {
-        std::vector<std::uint8_t> payload = {0};
-        auto frame = makeFrame(CommandKind::SetDirection, payload);
+        auto frame = makeFrame(0.0F, Direction::Neutral, 0x00U);
         auto result = processor.processFrame(frame, baseTime + std::chrono::milliseconds(18));
         if (!result.success || controller.state().direction != Direction::Neutral) {
             std::cerr << "SetDirection command failed to set neutral" << std::endl;
@@ -64,8 +57,7 @@ int runCommandProcessorTests() {
     }
 
     {
-        std::vector<std::uint8_t> payload = {1};
-        auto frame = makeFrame(CommandKind::SetDirection, payload);
+        auto frame = makeFrame(0.0F, Direction::Forward, 0x00U);
         auto result = processor.processFrame(frame, baseTime + std::chrono::milliseconds(30));
         if (!result.success || controller.state().direction != Direction::Forward) {
             std::cerr << "SetDirection command failed to set forward" << std::endl;
@@ -74,8 +66,7 @@ int runCommandProcessorTests() {
     }
 
     {
-        std::vector<std::uint8_t> payload = {2};
-        auto frame = makeFrame(CommandKind::SetDirection, payload);
+        auto frame = makeFrame(0.0F, Direction::Reverse, 0x00U);
         auto result = processor.processFrame(frame, baseTime + std::chrono::milliseconds(42));
         if (!result.success || controller.state().direction != Direction::Reverse) {
             std::cerr << "SetDirection command failed to set reverse" << std::endl;
@@ -84,18 +75,16 @@ int runCommandProcessorTests() {
     }
 
     {
-        std::vector<std::uint8_t> payload = {99};
-        auto frame = makeFrame(CommandKind::SetDirection, payload);
+        auto frame = makeFrame(1.0F, Direction::Forward, 0x02U);
         auto result = processor.processFrame(frame, baseTime + std::chrono::milliseconds(54));
-        if (result.success || controller.state().direction != Direction::Reverse) {
-            std::cerr << "SetDirection should fail on unknown code" << std::endl;
+        if (!result.success || controller.state().lightsOverrideMask != 0x02U) {
+            std::cerr << "Header lights override mask should update controller state" << std::endl;
             ++failures;
         }
     }
 
     {
-        std::vector<std::uint8_t> payload = {1};
-        auto frame = makeFrame(CommandKind::ToggleHeadlights, payload);
+        auto frame = makeFrame(0.0F, Direction::Reverse, 0x00U, 0x01U);
         auto result = processor.processFrame(frame, baseTime + std::chrono::milliseconds(120));
         if (!result.success || controller.state().lightsOverrideMask != 0x01U ||
             controller.state().lightsSource != LightsSource::Override) {
@@ -109,21 +98,10 @@ int runCommandProcessorTests() {
     }
 
     {
-        auto frame = makeFrame(CommandKind::SetSpeed, encodeFloat(1.0F));
-        frame.header.lightsOverride = 0x02U;
-        auto result = processor.processFrame(frame, baseTime + std::chrono::milliseconds(65));
-        if (!result.success || controller.state().lightsOverrideMask != 0x02U) {
-            std::cerr << "Header lights override mask should update controller state" << std::endl;
-            ++failures;
-        }
-    }
-
-    {
-        std::vector<std::uint8_t> payload = {0};
-        auto frame = makeFrame(CommandKind::ToggleHorn, payload);
-        auto result = processor.processFrame(frame, baseTime + std::chrono::milliseconds(200));
-        if (result.success || controller.state().horn) {
-            std::cerr << "Expected horn command to fail due to rate" << std::endl;
+        auto frame = makeFrame(0.0F, Direction::Forward, 0x00U, 0x02U);
+        auto result = processor.processFrame(frame, baseTime + std::chrono::milliseconds(130));
+        if (!result.success || !controller.state().horn) {
+            std::cerr << "Horn command should enable horn" << std::endl;
             ++failures;
         }
     }
@@ -135,9 +113,7 @@ int runCommandProcessorTests() {
                 legacyCalled = true;
                 return CommandResult{true, text};
             });
-        CommandFrame frame;
-        frame.header.payloadType = static_cast<std::uint16_t>(CommandPayloadType::LegacyText);
-        frame.payload = {'o', 'l', 'd'};
+        auto frame = makeFrame(0.0F, Direction::Forward, 0x00U, 0x00U, {'o', 'l', 'd'});
         auto result = legacyProcessor.processFrame(frame, std::chrono::steady_clock::now());
         if (!result.success || !legacyCalled) {
             std::cerr << "Legacy parser should have been invoked" << std::endl;
@@ -146,11 +122,20 @@ int runCommandProcessorTests() {
     }
 
     {
-        CommandFrame frame;
-        frame.header.payloadType = 0x1234;
-        auto result = processor.processFrame(frame, std::chrono::steady_clock::now());
-        if (result.success) {
-            std::cerr << "Unsupported payload type should fail" << std::endl;
+        auto baseline = controller.state();
+        auto frame = makeFrame(0.0F, Direction::Forward, 0x80U);
+        auto result = processor.processFrame(frame, baseTime + std::chrono::milliseconds(260));
+        auto after = controller.state();
+        if (!result.success || result.message != "Telemetry frame") {
+            std::cerr << "Telemetry frame should short-circuit" << std::endl;
+            ++failures;
+        }
+        if (after.targetSpeed != baseline.targetSpeed || after.direction != baseline.direction) {
+            std::cerr << "Telemetry frame should not modify state" << std::endl;
+            ++failures;
+        }
+        if (!after.lightsTelemetryOnly) {
+            std::cerr << "Telemetry flag should set telemetry-only state" << std::endl;
             ++failures;
         }
     }

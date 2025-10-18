@@ -1,6 +1,7 @@
-#include <chrono>
-#include <cctype>
+#include <algorithm>
 #include <atomic>
+#include <cctype>
+#include <chrono>
 #include <iostream>
 #include <memory>
 #include <sstream>
@@ -19,6 +20,21 @@
 using namespace std::chrono_literals;
 
 namespace {
+
+minitrain::CommandFrame buildLegacyTextFrame(const std::string &text, const minitrain::TrainController &controller) {
+    minitrain::CommandFrame frame;
+    const auto state = controller.state();
+    frame.header.targetSpeedMetersPerSecond = state.targetSpeed;
+    frame.header.direction = state.direction;
+    frame.header.lightsOverride = static_cast<std::uint8_t>(state.lightsOverrideMask & 0x7FU);
+    frame.header.timestampMicros = static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count());
+    frame.payload.resize(text.size() + 1U);
+    frame.payload[0] = 0x00U;
+    std::copy(text.begin(), text.end(), frame.payload.begin() + 1);
+    frame.header.auxPayloadLength = static_cast<std::uint16_t>(frame.payload.size());
+    return frame;
+}
 
 std::unordered_map<std::string, std::string> parseKeyValuePairs(const std::string &commandText) {
     std::unordered_map<std::string, std::string> result;
@@ -53,7 +69,6 @@ std::unordered_map<std::string, std::string> parseKeyValuePairs(const std::strin
 
 int main() {
     using minitrain::CommandFrame;
-    using minitrain::CommandPayloadType;
     using minitrain::CommandProcessor;
     using minitrain::Direction;
     using minitrain::PidController;
@@ -119,10 +134,8 @@ int main() {
     if (websocket) {
         websocket->setOnConnected([]() { std::cout << "Secure command channel connected" << '\n'; });
         websocket->setOnDisconnected([]() { std::cout << "Secure command channel disconnected" << '\n'; });
-        websocket->setMessageHandler([&processor](const std::string &payload) {
-            minitrain::CommandFrame inbound;
-            inbound.header.payloadType = static_cast<std::uint16_t>(CommandPayloadType::LegacyText);
-            inbound.payload.assign(payload.begin(), payload.end());
+        websocket->setMessageHandler([&processor, &controller](const std::string &payload) {
+            auto inbound = buildLegacyTextFrame(payload, controller);
             try {
                 auto now = std::chrono::steady_clock::now();
                 auto result = processor.processFrame(inbound, now);
@@ -174,9 +187,7 @@ int main() {
             if (line == "quit") {
                 break;
             }
-            minitrain::CommandFrame frame;
-            frame.header.payloadType = static_cast<std::uint16_t>(CommandPayloadType::LegacyText);
-            frame.payload.assign(line.begin(), line.end());
+            auto frame = buildLegacyTextFrame(line, controller);
             try {
                 auto result = processor.processFrame(frame, std::chrono::steady_clock::now());
                 std::cout << (result.success ? "OK: " : "ERR: ") << result.message << '\n';

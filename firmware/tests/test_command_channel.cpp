@@ -45,18 +45,11 @@ class FakeWebSocketClient : public WebSocketClient {
 
 std::vector<std::uint8_t> buildSpeedPayload(float value) {
     CommandFrame frame;
-    frame.header.payloadType = static_cast<std::uint16_t>(CommandPayloadType::Command);
-    frame.payload.push_back(static_cast<std::uint8_t>(CommandKind::SetSpeed));
-    std::uint32_t bits;
-    std::memcpy(&bits, &value, sizeof(float));
-#if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
-    bits = ((bits & 0x000000FFU) << 24U) | ((bits & 0x0000FF00U) << 8U) | ((bits & 0x00FF0000U) >> 8U) |
-           ((bits & 0xFF000000U) >> 24U);
-#endif
-    frame.payload.push_back(static_cast<std::uint8_t>(bits & 0xFFU));
-    frame.payload.push_back(static_cast<std::uint8_t>((bits >> 8U) & 0xFFU));
-    frame.payload.push_back(static_cast<std::uint8_t>((bits >> 16U) & 0xFFU));
-    frame.payload.push_back(static_cast<std::uint8_t>((bits >> 24U) & 0xFFU));
+    frame.header.targetSpeedMetersPerSecond = value;
+    frame.header.direction = Direction::Forward;
+    frame.header.lightsOverride = 0x00U;
+    frame.payload.push_back(0x00U);
+    frame.header.auxPayloadLength = static_cast<std::uint16_t>(frame.payload.size());
     return CommandChannel::encodeFrame(frame);
 }
 
@@ -116,12 +109,11 @@ int runCommandChannelTests() {
         ++failures;
     } else {
         auto frame = CommandChannel::decodeFrame(clientPtr->sent.back());
-        if (frame.header.sequence != sample.sequence ||
-            frame.header.payloadType != static_cast<std::uint16_t>(CommandPayloadType::Heartbeat)) {
+        if (frame.header.sequence != sample.sequence) {
             std::cerr << "Telemetry header invalid" << std::endl;
             ++failures;
         }
-        if (frame.header.timestampNanoseconds != sample.commandTimestamp) {
+        if (frame.header.timestampMicros != sample.commandTimestamp) {
             std::cerr << "Telemetry header should mirror command timestamp" << std::endl;
             ++failures;
         }
@@ -129,8 +121,18 @@ int runCommandChannelTests() {
             std::cerr << "Telemetry header should mirror session id" << std::endl;
             ++failures;
         }
-        if (frame.header.lightsOverride != sample.lightsOverrideMask) {
+        const std::uint8_t expectedLights = static_cast<std::uint8_t>((sample.lightsOverrideMask & 0x7FU) |
+                                                                      (sample.lightsTelemetryOnly ? 0x80U : 0x00U));
+        if (frame.header.lightsOverride != expectedLights) {
             std::cerr << "Telemetry header should mirror override mask" << std::endl;
+            ++failures;
+        }
+        if (frame.header.targetSpeedMetersPerSecond != sample.appliedSpeedMetersPerSecond) {
+            std::cerr << "Telemetry header should include applied speed" << std::endl;
+            ++failures;
+        }
+        if (frame.header.direction != sample.appliedDirection) {
+            std::cerr << "Telemetry header should include applied direction" << std::endl;
             ++failures;
         }
         if (frame.payload.size() != sizeof(float) * 12) {
