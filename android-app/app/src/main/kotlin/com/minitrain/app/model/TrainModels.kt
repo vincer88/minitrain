@@ -57,7 +57,10 @@ data class Telemetry(
     val lightsSource: LightsSource,
     val source: TelemetrySource,
     val lightsOverrideMask: Int,
-    val lightsTelemetryOnly: Boolean
+    val lightsTelemetryOnly: Boolean,
+    val failSafeProgress: Double = 0.0,
+    val failSafeElapsedMillis: Long = 0,
+    val failSafeActive: Boolean = false
 )
 
 @Serializable

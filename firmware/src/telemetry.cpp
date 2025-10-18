@@ -22,6 +22,7 @@ std::optional<TelemetrySample> TelemetryAggregator::average() const {
 
     TelemetrySample result{};
     bool anyFailSafe = false;
+    float failSafeProgressAccum = 0.0F;
     for (const auto &sample : samples_) {
         result.speedMetersPerSecond += sample.speedMetersPerSecond;
         result.motorCurrentAmps += sample.motorCurrentAmps;
@@ -29,6 +30,7 @@ std::optional<TelemetrySample> TelemetryAggregator::average() const {
         result.temperatureCelsius += sample.temperatureCelsius;
         result.appliedSpeedMetersPerSecond += sample.appliedSpeedMetersPerSecond;
         anyFailSafe = anyFailSafe || sample.failSafeActive;
+        failSafeProgressAccum += sample.failSafeProgress;
     }
 
     const float size = static_cast<float>(samples_.size());
@@ -37,6 +39,7 @@ std::optional<TelemetrySample> TelemetryAggregator::average() const {
     result.batteryVoltage /= size;
     result.temperatureCelsius /= size;
     result.appliedSpeedMetersPerSecond /= size;
+    result.failSafeProgress = failSafeProgressAccum / size;
     result.failSafeActive = anyFailSafe;
     const auto &latest = samples_.back();
     result.sessionId = latest.sessionId;
@@ -48,6 +51,7 @@ std::optional<TelemetrySample> TelemetryAggregator::average() const {
     result.lightsOverrideMask = latest.lightsOverrideMask;
     result.lightsTelemetryOnly = latest.lightsTelemetryOnly;
     result.appliedDirection = latest.appliedDirection;
+    result.failSafeElapsedMillis = latest.failSafeElapsedMillis;
     result.source = TelemetrySource::Aggregated;
 
     return result;

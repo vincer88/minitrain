@@ -21,6 +21,8 @@ struct TelemetrySample {
     float batteryVoltage{0.0F};
     float temperatureCelsius{0.0F};
     bool failSafeActive{false};
+    float failSafeProgress{0.0F};
+    std::uint32_t failSafeElapsedMillis{0};
     LightsState lightsState{LightsState::BothRed};
     LightsSource lightsSource{LightsSource::Automatic};
     ActiveCab activeCab{ActiveCab::None};

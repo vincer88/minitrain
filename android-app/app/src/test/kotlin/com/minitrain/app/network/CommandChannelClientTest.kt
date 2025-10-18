@@ -2,6 +2,7 @@ package com.minitrain.app.network
 
 import com.minitrain.app.model.ControlState
 import com.minitrain.app.model.Direction
+import com.minitrain.app.model.LightsSource
 import io.ktor.websocket.CloseReason
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -22,7 +23,11 @@ import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.Paths
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class CommandChannelClientTest {
@@ -69,42 +74,35 @@ class CommandChannelClientTest {
         override fun instant(): Instant = Instant.ofEpochMilli(scope.testScheduler.currentTime)
     }
 
-    private fun telemetryJson(timestampMicros: Long): String = """
-        {
-          "sessionId": "00000000-0000-0000-0000-000000000000",
-          "sequence": 1,
-          "commandTimestamp": $timestampMicros,
-          "speedMetersPerSecond": 0.0,
-          "motorCurrentAmps": 0.0,
-          "batteryVoltage": 0.0,
-          "temperatureCelsius": 0.0,
-          "appliedSpeedMetersPerSecond": 0.0,
-          "appliedDirection": "FORWARD",
-          "headlights": false,
-          "horn": false,
-          "direction": "FORWARD",
-          "emergencyStop": false,
-          "activeCab": "FRONT",
-          "lightsState": "BOTH_RED",
-          "lightsSource": "AUTOMATIC",
-          "source": "INSTANTANEOUS",
-          "lightsOverrideMask": 0,
-          "lightsTelemetryOnly": false
-        }
-    """.trimIndent()
-
     private fun telemetryFrame(timestampMicros: Long): ByteArray {
-        val payload = telemetryJson(timestampMicros).toByteArray()
+        val payload = loadFixture("telemetry/sample_payload.bin")
         val header = CommandFrameHeader(
             sessionId = ByteArray(16),
             sequence = 1,
             timestampMicros = timestampMicros,
-            targetSpeedMetersPerSecond = 0f,
+            targetSpeedMetersPerSecond = 2.8f,
             direction = Direction.FORWARD,
-            lightsOverride = 0x80.toByte(),
+            lightsOverride = 0x83.toByte(),
             auxiliaryPayloadLength = payload.size
         )
         return CommandFrameSerializer.encode(CommandFrame(header, payload))
+    }
+
+    private fun loadFixture(relative: String): ByteArray {
+        val root = projectRoot()
+        val path = root.resolve("fixtures").resolve(relative)
+        return Files.readAllBytes(path)
+    }
+
+    private fun projectRoot(): Path {
+        var current = Paths.get("").toAbsolutePath()
+        repeat(15) {
+            if (Files.exists(current.resolve(".git"))) {
+                return current
+            }
+            current = current.parent ?: break
+        }
+        throw IllegalStateException("Unable to locate project root from ${Paths.get("").toAbsolutePath()}")
     }
 
     @Test
@@ -186,6 +184,14 @@ class CommandChannelClientTest {
 
         session.enqueueIncoming(telemetryFrame(0))
         runCurrent()
+
+        val decoded = client.telemetry.replayCache.lastOrNull()
+        assertNotNull(decoded)
+        assertEquals(3.0, decoded.speedMetersPerSecond, 1e-6)
+        assertTrue(decoded.failSafeActive)
+        assertEquals(0.5, decoded.failSafeProgress, 1e-6)
+        assertEquals(450L, decoded.failSafeElapsedMillis)
+        assertEquals(LightsSource.FAIL_SAFE, decoded.lightsSource)
 
         advanceTimeBy(40)
         runCurrent()

@@ -124,9 +124,9 @@ void CommandChannel::publishTelemetry(const TelemetrySample &sample, std::uint32
     frame.header.timestampMicros = sample.commandTimestamp != 0 ? sample.commandTimestamp : timestampFallback;
     frame.header.targetSpeedMetersPerSecond = sample.appliedSpeedMetersPerSecond;
     frame.header.direction = sample.appliedDirection;
-    const std::uint8_t telemetryFlag = sample.lightsTelemetryOnly ? 0x80U : 0x00U;
+    const std::uint8_t telemetryFlag = 0x80U;
     frame.header.lightsOverride = static_cast<std::uint8_t>((sample.lightsOverrideMask & 0x7FU) | telemetryFlag);
-    frame.payload.resize(sizeof(float) * 12);
+    frame.payload.resize(sizeof(float) * 6 + sizeof(std::uint32_t) + 8);
 
     auto encodeFloat = [](float value, std::uint8_t *out) {
         std::uint32_t bits;
@@ -140,14 +140,29 @@ void CommandChannel::publishTelemetry(const TelemetrySample &sample, std::uint32
     encodeFloat(sample.motorCurrentAmps, payload + sizeof(float));
     encodeFloat(sample.batteryVoltage, payload + 2 * sizeof(float));
     encodeFloat(sample.temperatureCelsius, payload + 3 * sizeof(float));
-    encodeFloat(sample.failSafeActive ? 1.0F : 0.0F, payload + 4 * sizeof(float));
-    encodeFloat(static_cast<float>(sample.lightsState), payload + 5 * sizeof(float));
-    encodeFloat(static_cast<float>(sample.lightsSource), payload + 6 * sizeof(float));
-    encodeFloat(static_cast<float>(sample.activeCab), payload + 7 * sizeof(float));
-    encodeFloat(static_cast<float>(sample.lightsOverrideMask), payload + 8 * sizeof(float));
-    encodeFloat(sample.appliedSpeedMetersPerSecond, payload + 9 * sizeof(float));
-    encodeFloat(static_cast<float>(sample.appliedDirection), payload + 10 * sizeof(float));
-    encodeFloat(static_cast<float>(sample.source), payload + 11 * sizeof(float));
+    encodeFloat(sample.appliedSpeedMetersPerSecond, payload + 4 * sizeof(float));
+    encodeFloat(sample.failSafeProgress, payload + 5 * sizeof(float));
+
+    std::uint8_t *byteOut = payload + 6 * sizeof(float);
+    const std::uint32_t failSafeElapsed = hostToLittle32(sample.failSafeElapsedMillis);
+    std::memcpy(byteOut, &failSafeElapsed, sizeof(failSafeElapsed));
+    byteOut += sizeof(failSafeElapsed);
+
+    std::uint8_t flags = 0U;
+    if (sample.failSafeActive) {
+        flags |= 0x01U;
+    }
+    if (sample.lightsTelemetryOnly) {
+        flags |= 0x02U;
+    }
+    *byteOut++ = flags;
+    *byteOut++ = static_cast<std::uint8_t>(sample.activeCab);
+    *byteOut++ = static_cast<std::uint8_t>(sample.lightsState);
+    *byteOut++ = static_cast<std::uint8_t>(sample.lightsSource);
+    *byteOut++ = sample.lightsOverrideMask;
+    *byteOut++ = static_cast<std::uint8_t>(sample.source);
+    *byteOut++ = encodeDirection(sample.appliedDirection);
+    *byteOut++ = 0U;
 
     frame.header.auxPayloadLength = static_cast<std::uint16_t>(frame.payload.size());
     client_->sendBinary(encodeFrame(frame));
