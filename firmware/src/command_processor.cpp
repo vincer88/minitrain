@@ -18,6 +18,8 @@ CommandResult CommandProcessor::processFrame(const CommandFrame &frame, std::chr
         return {true, "Telemetry frame"};
     }
 
+    const auto arrivalSystem = std::chrono::system_clock::now();
+
     if (lastArrival_) {
         const auto delta = arrival - *lastArrival_;
         if (delta <= std::chrono::milliseconds(30)) {
@@ -30,11 +32,21 @@ CommandResult CommandProcessor::processFrame(const CommandFrame &frame, std::chr
     }
     lastArrival_ = arrival;
 
-    auto remoteTimestamp = frame.header.timestampMicros == 0
-                               ? arrival
-                               : std::chrono::steady_clock::time_point{
-                                     std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-                                         std::chrono::microseconds{frame.header.timestampMicros})};
+    auto remoteTimestamp = arrival;
+    if (frame.header.timestampMicros != 0) {
+        // The frame timestamp is expressed in microseconds since the Unix epoch on the sender's
+        // system clock. Convert it to a local system_clock reference so we can normalize it onto
+        // our steady clock timeline before registering it with the controller.
+        const auto remoteSystem = std::chrono::system_clock::time_point{
+            std::chrono::duration_cast<std::chrono::system_clock::duration>(
+                std::chrono::microseconds{frame.header.timestampMicros})};
+        auto commandAgeSystem = arrivalSystem - remoteSystem;
+        if (commandAgeSystem < std::chrono::system_clock::duration::zero()) {
+            commandAgeSystem = std::chrono::system_clock::duration::zero();
+        }
+        const auto commandAgeSteady = std::chrono::duration_cast<std::chrono::steady_clock::duration>(commandAgeSystem);
+        remoteTimestamp = arrival - commandAgeSteady;
+    }
 
     controller_.setTargetSpeed(frame.header.targetSpeedMetersPerSecond);
     controller_.setDirection(frame.header.direction);

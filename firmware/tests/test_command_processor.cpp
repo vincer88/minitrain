@@ -140,6 +140,56 @@ int runCommandProcessorTests() {
         }
     }
 
+    {
+        auto deterministicNow = std::chrono::steady_clock::now();
+        auto clock = [&deterministicNow]() { return deterministicNow; };
+        TrainController deterministicController(
+            PidController{0.5F, 0.0F, 0.0F, 0.0F, 1.0F},
+            [](float) {},
+            [](const TelemetrySample &) {},
+            std::chrono::milliseconds{MINITRAIN_FAILSAFE_THRESHOLD_MS},
+            std::chrono::milliseconds{MINITRAIN_PILOT_RELEASE_MS},
+            std::chrono::milliseconds{MINITRAIN_FAILSAFE_RAMP_MS},
+            clock);
+        CommandProcessor deterministicProcessor(deterministicController);
+
+        auto frame = makeFrame(0.0F, Direction::Neutral, 0x00U);
+        const auto remoteSystem = std::chrono::system_clock::now() - std::chrono::milliseconds(5);
+        frame.header.timestampMicros = static_cast<std::uint64_t>(
+            std::chrono::duration_cast<std::chrono::microseconds>(remoteSystem.time_since_epoch()).count());
+        auto arrival = deterministicNow;
+        auto result = deterministicProcessor.processFrame(frame, arrival);
+        if (!result.success) {
+            std::cerr << "Deterministic controller should accept timestamped frame" << std::endl;
+            ++failures;
+        }
+
+        const auto lastTimestamp = deterministicController.state().realtime.lastCommandTimestamp;
+        if (lastTimestamp > arrival) {
+            std::cerr << "Remote timestamp should not land in the future" << std::endl;
+            ++failures;
+        }
+
+        auto staleFrame = makeFrame(0.0F, Direction::Neutral, 0x00U);
+        const auto staleRemoteSystem = remoteSystem - std::chrono::seconds(1);
+        staleFrame.header.timestampMicros = static_cast<std::uint64_t>(
+            std::chrono::duration_cast<std::chrono::microseconds>(staleRemoteSystem.time_since_epoch()).count());
+        deterministicNow += std::chrono::milliseconds(10);
+        auto staleResult = deterministicProcessor.processFrame(staleFrame, deterministicNow);
+        if (!staleResult.success) {
+            std::cerr << "Stale frame should still be processed" << std::endl;
+            ++failures;
+        }
+
+        const auto staleThreshold = std::chrono::milliseconds{MINITRAIN_FAILSAFE_THRESHOLD_MS};
+        deterministicNow += staleThreshold + std::chrono::milliseconds(10);
+        deterministicController.onSpeedMeasurement(0.0F, std::chrono::milliseconds(10));
+        if (!deterministicController.state().failSafeActive) {
+            std::cerr << "Stale timestamp should trigger fail-safe" << std::endl;
+            ++failures;
+        }
+    }
+
     return failures;
 }
 
