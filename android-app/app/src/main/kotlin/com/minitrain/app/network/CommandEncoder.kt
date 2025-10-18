@@ -2,7 +2,6 @@ package com.minitrain.app.network
 
 import com.minitrain.app.model.ControlState
 import com.minitrain.app.model.Direction
-import com.minitrain.app.model.Telemetry
 import com.minitrain.app.model.TrainCommand
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -20,12 +19,6 @@ object CommandEncoder {
     }
 
     fun encodeState(state: ControlState): String = json.encodeToString(state)
-}
-
-object TelemetryParser {
-    private val json = Json { ignoreUnknownKeys = true }
-
-    fun parse(raw: String): Telemetry = json.decodeFromString(raw)
 }
 
 fun Direction.toProtocolValue(): String = when (this) {

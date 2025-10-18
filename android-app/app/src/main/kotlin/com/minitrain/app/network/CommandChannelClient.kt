@@ -1,8 +1,12 @@
 package com.minitrain.app.network
 
+import com.minitrain.app.model.ActiveCab
 import com.minitrain.app.model.ControlState
 import com.minitrain.app.model.Direction
+import com.minitrain.app.model.LightsSource
+import com.minitrain.app.model.LightsState
 import com.minitrain.app.model.Telemetry
+import com.minitrain.app.model.TelemetrySource
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
 import io.ktor.client.plugins.websocket.WebSockets
@@ -35,6 +39,8 @@ import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.collections.ArrayDeque
 
@@ -123,6 +129,9 @@ class CommandChannelClient(
         }
     }
 ) {
+    companion object {
+        private const val TELEMETRY_PAYLOAD_SIZE = 36
+    }
     private val sequence = AtomicInteger(0)
     private val sessionBytes: ByteArray = uuidToLittleEndian(sessionId)
     private val queuedAuxiliaryPayloads = ArrayDeque<ByteArray>()
@@ -269,8 +278,7 @@ class CommandChannelClient(
             try {
                 val frame = CommandFrameSerializer.decode(payload)
                 if (frame.header.lightsOverride.toInt() and 0x80 != 0) {
-                    val text = frame.payload.decodeToString()
-                    val telemetry = TelemetryParser.parse(text)
+                    val telemetry = decodeTelemetryFrame(frame) ?: continue
                     lastTelemetryCommandTimestampMicros = telemetry.commandTimestamp
                     if (_failsafeRampStatus.value.isActive) {
                         _failsafeRampStatus.value = FailsafeRampStatus.inactive()
@@ -282,6 +290,82 @@ class CommandChannelClient(
             }
         }
         session.close()
+    }
+
+    private fun decodeTelemetryFrame(frame: CommandFrame): Telemetry? {
+        if (frame.payload.size < TELEMETRY_PAYLOAD_SIZE) {
+            return null
+        }
+        val buffer = ByteBuffer.wrap(frame.payload).order(ByteOrder.LITTLE_ENDIAN)
+        val speed = buffer.float.toDouble()
+        val motorCurrent = buffer.float.toDouble()
+        val batteryVoltage = buffer.float.toDouble()
+        val temperature = buffer.float.toDouble()
+        val appliedSpeed = buffer.float.toDouble()
+        val failSafeProgress = buffer.float.toDouble().coerceIn(0.0, 1.0)
+        val failSafeElapsed = buffer.int.toLong() and 0xFFFF_FFFFL
+        val flags = buffer.get().toInt() and 0xFF
+        val activeCab = decodeActiveCab(buffer.get().toInt() and 0xFF)
+        val lightsState = decodeLightsState(buffer.get().toInt() and 0xFF)
+        val lightsSource = decodeLightsSource(buffer.get().toInt() and 0xFF)
+        val lightsOverrideMask = buffer.get().toInt() and 0xFF
+        val telemetrySource = decodeTelemetrySource(buffer.get().toInt() and 0xFF)
+        val appliedDirection = CommandFrameSerializer.protocolToDirection(buffer.get())
+        buffer.get() // reserved
+
+        val failSafeActive = flags and 0x01 != 0
+        val lightsTelemetryOnly = flags and 0x02 != 0
+        val sessionUuid = littleEndianBytesToUuid(frame.header.sessionId).toString()
+
+        return Telemetry(
+            sessionId = sessionUuid,
+            sequence = frame.header.sequence.toLong() and 0xFFFF_FFFFL,
+            commandTimestamp = frame.header.timestampMicros,
+            speedMetersPerSecond = speed,
+            motorCurrentAmps = motorCurrent,
+            batteryVoltage = batteryVoltage,
+            temperatureCelsius = temperature,
+            appliedSpeedMetersPerSecond = appliedSpeed,
+            appliedDirection = appliedDirection,
+            headlights = (lightsOverrideMask and 0x03) != 0,
+            horn = false,
+            direction = frame.header.direction,
+            emergencyStop = false,
+            activeCab = activeCab,
+            lightsState = lightsState,
+            lightsSource = lightsSource,
+            source = telemetrySource,
+            lightsOverrideMask = lightsOverrideMask,
+            lightsTelemetryOnly = lightsTelemetryOnly,
+            failSafeProgress = failSafeProgress,
+            failSafeElapsedMillis = failSafeElapsed,
+            failSafeActive = failSafeActive
+        )
+    }
+
+    private fun decodeActiveCab(code: Int): ActiveCab = when (code) {
+        1 -> ActiveCab.FRONT
+        2 -> ActiveCab.REAR
+        else -> ActiveCab.NONE
+    }
+
+    private fun decodeLightsState(code: Int): LightsState = when (code) {
+        1 -> LightsState.FRONT_WHITE_REAR_RED
+        2 -> LightsState.FRONT_RED_REAR_WHITE
+        3 -> LightsState.BOTH_OFF
+        4 -> LightsState.BOTH_WHITE
+        else -> LightsState.BOTH_RED
+    }
+
+    private fun decodeLightsSource(code: Int): LightsSource = when (code) {
+        1 -> LightsSource.OVERRIDE
+        2 -> LightsSource.FAIL_SAFE
+        else -> LightsSource.AUTOMATIC
+    }
+
+    private fun decodeTelemetrySource(code: Int): TelemetrySource = when (code) {
+        1 -> TelemetrySource.AGGREGATED
+        else -> TelemetrySource.INSTANTANEOUS
     }
 }
 

@@ -70,7 +70,7 @@ object CommandFrameSerializer {
         Direction.REVERSE -> 2
     }.toByte()
 
-    private fun protocolToDirection(code: Byte): Direction = when (code.toInt() and 0xFF) {
+    fun protocolToDirection(code: Byte): Direction = when (code.toInt() and 0xFF) {
         0 -> Direction.NEUTRAL
         1 -> Direction.FORWARD
         2 -> Direction.REVERSE
@@ -84,6 +84,15 @@ fun uuidToLittleEndian(uuid: UUID): ByteArray {
     buffer.putLong(uuid.mostSignificantBits)
     buffer.putLong(uuid.leastSignificantBits)
     return buffer.array().reversedArray()
+}
+
+fun littleEndianBytesToUuid(bytes: ByteArray): UUID {
+    require(bytes.size == 16) { "UUID must be 16 bytes" }
+    val buffer = ByteBuffer.wrap(bytes.reversedArray())
+    buffer.order(ByteOrder.BIG_ENDIAN)
+    val most = buffer.long
+    val least = buffer.long
+    return UUID(most, least)
 }
 
 fun buildHeader(

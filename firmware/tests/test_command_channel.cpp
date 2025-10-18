@@ -7,8 +7,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <queue>
+#include <stdexcept>
 
 #include "test_suite.hpp"
 
@@ -53,6 +56,15 @@ std::vector<std::uint8_t> buildSpeedPayload(float value) {
     return CommandChannel::encodeFrame(frame);
 }
 
+std::vector<std::uint8_t> readFixture(const std::string &relative) {
+    const auto base = std::filesystem::path(__FILE__).parent_path() / ".." / ".." / relative;
+    std::ifstream file(base, std::ios::binary);
+    if (!file) {
+        throw std::runtime_error("Unable to open fixture: " + base.string());
+    }
+    return std::vector<std::uint8_t>(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+}
+
 } // namespace
 
 int runCommandChannelTests() {
@@ -91,8 +103,10 @@ int runCommandChannelTests() {
     sample.batteryVoltage = 11.1F;
     sample.temperatureCelsius = 35.0F;
     sample.failSafeActive = true;
+    sample.failSafeProgress = 0.5F;
+    sample.failSafeElapsedMillis = 450U;
     sample.lightsState = LightsState::FrontWhiteRearRed;
-    sample.lightsSource = LightsSource::Automatic;
+    sample.lightsSource = LightsSource::FailSafe;
     sample.activeCab = ActiveCab::Front;
     sample.lightsOverrideMask = 0x03U;
     sample.lightsTelemetryOnly = false;
@@ -121,10 +135,9 @@ int runCommandChannelTests() {
             std::cerr << "Telemetry header should mirror session id" << std::endl;
             ++failures;
         }
-        const std::uint8_t expectedLights = static_cast<std::uint8_t>((sample.lightsOverrideMask & 0x7FU) |
-                                                                      (sample.lightsTelemetryOnly ? 0x80U : 0x00U));
+        const std::uint8_t expectedLights = static_cast<std::uint8_t>((sample.lightsOverrideMask & 0x7FU) | 0x80U);
         if (frame.header.lightsOverride != expectedLights) {
-            std::cerr << "Telemetry header should mirror override mask" << std::endl;
+            std::cerr << "Telemetry header should mirror override mask and telemetry flag" << std::endl;
             ++failures;
         }
         if (frame.header.targetSpeedMetersPerSecond != sample.appliedSpeedMetersPerSecond) {
@@ -135,48 +148,18 @@ int runCommandChannelTests() {
             std::cerr << "Telemetry header should include applied direction" << std::endl;
             ++failures;
         }
-        if (frame.payload.size() != sizeof(float) * 12) {
+        if (frame.payload.size() != 36U) {
             std::cerr << "Telemetry payload size mismatch" << std::endl;
             ++failures;
-        }
-        if (frame.payload.size() == sizeof(float) * 12) {
-            float failSafeFlag;
-            std::memcpy(&failSafeFlag, frame.payload.data() + 4 * sizeof(float), sizeof(float));
-#if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
-            std::uint32_t bits;
-            std::memcpy(&bits, &failSafeFlag, sizeof(float));
-            bits = ((bits & 0x000000FFU) << 24U) | ((bits & 0x0000FF00U) << 8U) | ((bits & 0x00FF0000U) >> 8U) |
-                   ((bits & 0xFF000000U) >> 24U);
-            std::memcpy(&failSafeFlag, &bits, sizeof(float));
-#endif
-            if (failSafeFlag < 0.9F) {
-                std::cerr << "Fail-safe flag should be encoded as 1.0F" << std::endl;
-                ++failures;
-            }
-            float encodedLightsState;
-            std::memcpy(&encodedLightsState, frame.payload.data() + 5 * sizeof(float), sizeof(float));
-#if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
-            std::uint32_t lightsBits;
-            std::memcpy(&lightsBits, &encodedLightsState, sizeof(float));
-            lightsBits = ((lightsBits & 0x000000FFU) << 24U) | ((lightsBits & 0x0000FF00U) << 8U) |
-                         ((lightsBits & 0x00FF0000U) >> 8U) | ((lightsBits & 0xFF000000U) >> 24U);
-            std::memcpy(&encodedLightsState, &lightsBits, sizeof(float));
-#endif
-            if (static_cast<int>(encodedLightsState + 0.5F) != static_cast<int>(sample.lightsState)) {
-                std::cerr << "Telemetry should encode lights state" << std::endl;
-                ++failures;
-            }
-            float appliedSpeedEncoded;
-            std::memcpy(&appliedSpeedEncoded, frame.payload.data() + 9 * sizeof(float), sizeof(float));
-#if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
-            std::uint32_t appliedSpeedBits;
-            std::memcpy(&appliedSpeedBits, &appliedSpeedEncoded, sizeof(float));
-            appliedSpeedBits = ((appliedSpeedBits & 0x000000FFU) << 24U) | ((appliedSpeedBits & 0x0000FF00U) << 8U) |
-                               ((appliedSpeedBits & 0x00FF0000U) >> 8U) | ((appliedSpeedBits & 0xFF000000U) >> 24U);
-            std::memcpy(&appliedSpeedEncoded, &appliedSpeedBits, sizeof(float));
-#endif
-            if (appliedSpeedEncoded < 2.79F || appliedSpeedEncoded > 2.81F) {
-                std::cerr << "Applied speed should be encoded" << std::endl;
+        } else {
+            try {
+                const auto expectedPayload = readFixture("fixtures/telemetry/sample_payload.bin");
+                if (frame.payload != expectedPayload) {
+                    std::cerr << "Telemetry payload did not match fixture" << std::endl;
+                    ++failures;
+                }
+            } catch (const std::exception &ex) {
+                std::cerr << ex.what() << std::endl;
                 ++failures;
             }
         }
