@@ -139,11 +139,9 @@ cd android-app
 3. Lancer les tests instrumentés :
    ```bash
    cd android-app
-   ./gradlew connectedAndroidTest
-   ./gradlew :app:connectedComposeDebugAndroidTest
+   ./gradlew connectedDebugAndroidTest
    ```
-   - `connectedAndroidTest` valide la pile réseau TLS/mTLS et la logique de ViewModel.
-   - `connectedComposeDebugAndroidTest` exécute désormais `TrainControlScreenTest`, qui simule la glissière de vitesse, les puces de direction et le choix de cabine tout en vérifiant les appels `TrainViewModel`. Le test force également les états `Buffering` / `Error` du flux vidéo, affiche l’overlay cabine et déclenche les actions de relance.
+   - `connectedDebugAndroidTest` exécute l’intégralité de la suite instrumentée (tests réseau et tests Compose `TrainControlScreenTest` / `TrainSelectionScreenTest`). Il n’existe pas de tâche `connectedComposeDebugAndroidTest` distincte : les tests Compose sont inclus dans ce jeu unique.
 
    Les captures d’écran générées pendant `TrainControlScreenTest` sont enregistrées sur l’appareil dans `Android/data/com.minitrain/files/reports/screenshots`. Pour les inclure dans une revue ou un artefact CI, rapatriez-les vers `android-app/app/build/reports/screenshots/` :
 
@@ -151,7 +149,7 @@ cd android-app
    adb pull /sdcard/Android/data/com.minitrain/files/reports/screenshots android-app/app/build/reports/screenshots/
    ```
 
-> **Pré-requis** : définissez `cab.video.previewUrl` dans `android-app/local.properties` pour qu'un flux vidéo (ESP32 ou mock `scripts/mock_video_server.py`) soit accessible pendant les tests Compose. Sans flux, les assertions de statut « Flux disponible » échoueront.
+> **Note** : la suite instrumentée Compose utilise un endpoint fictif (`https://example.com/video.m3u8`) et ne lit pas de propriété `cab.video.previewUrl`. Aucun flux vidéo réel n’est requis pour exécuter les tests.
 
 #### Tests manuels
 
