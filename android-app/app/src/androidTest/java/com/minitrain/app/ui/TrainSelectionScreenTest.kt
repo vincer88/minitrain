@@ -1,8 +1,12 @@
 package com.minitrain.app.ui
 
 import androidx.activity.ComponentActivity
+import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertDoesNotExist
+import androidx.compose.ui.test.assertExists
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -72,12 +76,14 @@ class TrainSelectionScreenTest {
     fun trainBecomingUnavailableUpdatesIndicators() {
         var launchedTrainId: String? = null
         var unavailableTrainId: String? = null
+        var availableTrainId: String? = null
         composeTestRule.setContent {
             MaterialTheme {
                 TrainSelectionRoute(
                     viewModel = viewModel,
                     onTrainSelected = { launchedTrainId = it.id },
-                    onTrainUnavailable = { unavailableTrainId = it.id }
+                    onTrainUnavailable = { unavailableTrainId = it.id },
+                    onTrainAvailable = { availableTrainId = it.id }
                 )
             }
         }
@@ -88,8 +94,7 @@ class TrainSelectionScreenTest {
 
         composeTestRule.onNodeWithTag("select-$trainId").performClick()
         composeTestRule.waitUntil(timeoutMillis = 5_000) { launchedTrainId == trainId }
-        composeTestRule.onNodeWithTag("connection-$trainId").assertTextEquals("Connecté")
-        composeTestRule.onNodeWithTag("availability-$trainId").assertTextEquals("Disponible")
+        composeTestRule.onNodeWithTag("status-$trainId").assertTextEquals("En cours")
 
         runBlocking {
             withContext(Dispatchers.Main) {
@@ -98,12 +103,51 @@ class TrainSelectionScreenTest {
         }
 
         composeTestRule.waitUntil(timeoutMillis = 5_000) {
-            viewModel.uiState.value.trains.first().status.isAvailable.not()
+            viewModel.uiState.value.trains.first().status.isLost
         }
 
-        composeTestRule.onNodeWithTag("availability-$trainId").assertTextEquals("Indisponible")
-        composeTestRule.onNodeWithTag("connection-$trainId").assertTextEquals("Déconnecté")
+        composeTestRule.onNodeWithTag("status-$trainId").assertTextEquals("Perdu")
         composeTestRule.onNodeWithTag("select-$trainId").assertIsNotEnabled()
         composeTestRule.waitUntil(timeoutMillis = 5_000) { unavailableTrainId == trainId }
+
+        runBlocking {
+            withContext(Dispatchers.Main) {
+                repository.setAvailability(trainId, true)
+            }
+        }
+
+        composeTestRule.waitUntil(timeoutMillis = 5_000) {
+            viewModel.uiState.value.trains.first().status.isAvailable
+        }
+
+        composeTestRule.onNodeWithTag("status-$trainId").assertTextEquals("Disponible")
+        composeTestRule.waitUntil(timeoutMillis = 5_000) { availableTrainId == trainId }
+    }
+
+    @Test
+    fun controlOverlayDisplayedWhenTrainSelected() {
+        composeTestRule.setContent {
+            MaterialTheme {
+                TrainSelectionRoute(
+                    viewModel = viewModel,
+                    onTrainSelected = {},
+                    onTrainUnavailable = {},
+                    controlOverlay = { _, _ ->
+                        Box(modifier = Modifier.testTag("overlay"))
+                    }
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithTag("add-train").performClick()
+        composeTestRule.waitUntil(timeoutMillis = 5_000) { viewModel.uiState.value.trains.isNotEmpty() }
+        val trainId = viewModel.uiState.value.trains.first().endpoint.id
+
+        composeTestRule.onNodeWithTag("overlay").assertDoesNotExist()
+
+        composeTestRule.onNodeWithTag("select-$trainId").performClick()
+        composeTestRule.waitUntil(timeoutMillis = 5_000) { viewModel.selectedTrain.value?.id == trainId }
+
+        composeTestRule.onNodeWithTag("overlay").assertExists()
     }
 }

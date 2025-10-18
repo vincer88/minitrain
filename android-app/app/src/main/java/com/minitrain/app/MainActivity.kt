@@ -6,16 +6,17 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
-import androidx.compose.runtime.LaunchedEffect
-import androidx.navigation.compose.NavHost
-import androidx.navigation.compose.composable
-import androidx.navigation.compose.rememberNavController
+import androidx.compose.ui.platform.testTag
 import com.minitrain.app.model.TrainEndpoint
 import com.minitrain.app.network.ExoPlayerVideoStreamClient
 import com.minitrain.app.repository.TrainDirectoryRepository
@@ -29,6 +30,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
@@ -42,71 +44,107 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    val navController = rememberNavController()
                     val context = this
                     val activeSession: MutableState<TrainSession?> = remember { mutableStateOf(null) }
+                    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+                    val coroutineScope = rememberCoroutineScope()
+
+                    fun releaseSession(updateRepository: Boolean) {
+                        val session = activeSession.value ?: return
+                        if (updateRepository) {
+                            selectionViewModel.updateConnection(session.endpoint.id, false)
+                        }
+                        session.release()
+                        if (currentSession?.endpoint?.id == session.endpoint.id) {
+                            currentSession = null
+                        }
+                        activeSession.value = null
+                    }
 
                     DisposableEffect(Unit) {
                         onDispose {
-                            activeSession.value?.release()
-                            currentSession = null
+                            releaseSession(updateRepository = true)
                         }
                     }
 
-                    NavHost(navController = navController, startDestination = "train-selection") {
-                        composable("train-selection") {
-                            TrainSelectionRoute(
-                                viewModel = selectionViewModel,
-                                onTrainSelected = { endpoint ->
-                                    activeSession.value?.release()
-                                    val session = createTrainSession(endpoint)
-                                    currentSession = session
-                                    activeSession.value = session
-                                    navController.navigate("train-control")
-                                },
-                                onTrainUnavailable = { endpoint ->
-                                    val session = activeSession.value
-                                    if (session?.endpoint?.id == endpoint.id) {
-                                        session.release()
-                                        activeSession.value = null
-                                        if (currentSession?.endpoint?.id == endpoint.id) {
-                                            currentSession = null
-                                        }
-                                        selectionViewModel.updateConnection(endpoint.id, false)
-                                        Toast.makeText(
-                                            context,
-                                            "Le train ${endpoint.name} est indisponible",
-                                            Toast.LENGTH_SHORT
-                                        ).show()
-                                        navController.popBackStack()
-                                    }
+                    TrainSelectionRoute(
+                        viewModel = selectionViewModel,
+                        onTrainSelected = { endpoint ->
+                            coroutineScope.launch {
+                                if (sheetState.isVisible) {
+                                    sheetState.hide()
                                 }
-                            )
-                        }
-                        composable("train-control") {
+                                releaseSession(updateRepository = false)
+                                val session = createTrainSession(endpoint)
+                                currentSession = session
+                                activeSession.value = session
+                            }
+                        },
+                        onTrainUnavailable = { endpoint ->
                             val session = activeSession.value
-                            if (session == null) {
-                                LaunchedEffect(Unit) {
-                                    navController.popBackStack()
-                                }
-                            } else {
-                                TrainControlScreen(
-                                    viewModel = session.viewModel,
-                                    trainName = session.endpoint.name,
-                                    videoEndpoint = session.endpoint.videoEndpoint,
-                                    onBack = {
-                                        selectionViewModel.updateConnection(session.endpoint.id, false)
-                                        session.release()
-                                        activeSession.value = null
-                                        if (currentSession?.endpoint?.id == session.endpoint.id) {
-                                            currentSession = null
-                                        }
-                                        navController.popBackStack()
+                            if (session?.endpoint?.id == endpoint.id) {
+                                coroutineScope.launch {
+                                    if (sheetState.isVisible) {
+                                        sheetState.hide()
                                     }
-                                )
+                                    releaseSession(updateRepository = false)
+                                    Toast.makeText(
+                                        context,
+                                        "Le train ${endpoint.name} est indisponible",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            }
+                        },
+                        onTrainAvailable = { endpoint ->
+                            Toast.makeText(
+                                context,
+                                "Le train ${endpoint.name} redevient disponible",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        },
+                        onDismissControl = { endpoint ->
+                            val session = activeSession.value
+                            if (session?.endpoint?.id == endpoint.id) {
+                                coroutineScope.launch {
+                                    if (sheetState.isVisible) {
+                                        sheetState.hide()
+                                    }
+                                    releaseSession(updateRepository = true)
+                                }
+                            }
+                        },
+                        controlOverlay = { endpoint, onDismiss ->
+                            val session = activeSession.value
+                            if (session != null && session.endpoint.id == endpoint.id) {
+                                LaunchedEffect(session) {
+                                    sheetState.show()
+                                }
+                                ModalBottomSheet(
+                                    modifier = Modifier.testTag("control-overlay"),
+                                    onDismissRequest = {
+                                        coroutineScope.launch {
+                                            sheetState.hide()
+                                            onDismiss()
+                                        }
+                                    },
+                                    sheetState = sheetState
+                                ) {
+                                    TrainControlScreen(
+                                        viewModel = session.viewModel,
+                                        trainName = session.endpoint.name,
+                                        videoEndpoint = session.endpoint.videoEndpoint,
+                                        onBack = {
+                                            coroutineScope.launch {
+                                                sheetState.hide()
+                                                onDismiss()
+                                            }
+                                        }
+                                    )
+                                }
                             }
                         }
-                    }
+                    )
                 }
             }
         }
@@ -114,8 +152,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        currentSession?.let { selectionViewModel.updateConnection(it.endpoint.id, false) }
-        currentSession?.release()
+        currentSession?.let {
+            selectionViewModel.updateConnection(it.endpoint.id, false)
+            it.release()
+        }
         currentSession = null
         selectionViewModel.clear()
     }

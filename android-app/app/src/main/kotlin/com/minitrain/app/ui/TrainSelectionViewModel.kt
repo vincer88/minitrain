@@ -1,5 +1,6 @@
 package com.minitrain.app.ui
 
+import com.minitrain.app.model.TrainConnectionPhase
 import com.minitrain.app.model.TrainConnectionStatus
 import com.minitrain.app.model.TrainEndpoint
 import com.minitrain.app.repository.TrainDirectoryRepository
@@ -24,7 +25,7 @@ class TrainSelectionViewModel(
     private val scope: CoroutineScope
     private val internalJob: Job?
     private val counter = AtomicInteger(directoryRepository.directory.value.trains.size)
-    private val availabilityCache = mutableMapOf<String, Boolean>()
+    private val statusCache = mutableMapOf<String, TrainConnectionPhase>()
 
     private val _uiState = MutableStateFlow(TrainSelectionUiState())
     val uiState: StateFlow<TrainSelectionUiState> = _uiState.asStateFlow()
@@ -55,7 +56,7 @@ class TrainSelectionViewModel(
                 val selectedEndpoint = connectedEntry?.endpoint
                 _selectedTrain.value = selectedEndpoint
                 val currentIds = directory.trains.map { it.endpoint.id }.toSet()
-                val iterator = availabilityCache.keys.iterator()
+                val iterator = statusCache.keys.iterator()
                 while (iterator.hasNext()) {
                     val id = iterator.next()
                     if (id !in currentIds) {
@@ -63,11 +64,22 @@ class TrainSelectionViewModel(
                     }
                 }
                 directory.trains.forEach { entry ->
-                    val previous = availabilityCache[entry.endpoint.id]
-                    availabilityCache[entry.endpoint.id] = entry.status.isAvailable
-                    if (entry.status.isConnected && previous == true && !entry.status.isAvailable) {
-                        scope.launch {
-                            _events.emit(TrainSelectionEvent.TrainBecameUnavailable(entry.endpoint))
+                    val previous = statusCache[entry.endpoint.id]
+                    val current = entry.status.phase
+                    statusCache[entry.endpoint.id] = current
+                    if (previous != null && previous != current) {
+                        when {
+                            previous == TrainConnectionPhase.IN_PROGRESS && current == TrainConnectionPhase.LOST -> {
+                                scope.launch {
+                                    _events.emit(TrainSelectionEvent.TrainLost(entry.endpoint))
+                                }
+                            }
+
+                            previous == TrainConnectionPhase.LOST && current == TrainConnectionPhase.AVAILABLE -> {
+                                scope.launch {
+                                    _events.emit(TrainSelectionEvent.TrainAvailable(entry.endpoint))
+                                }
+                            }
                         }
                     }
                 }
@@ -138,5 +150,6 @@ data class TrainItemUiState(
 
 sealed interface TrainSelectionEvent {
     data class ControlScreenRequested(val endpoint: TrainEndpoint) : TrainSelectionEvent
-    data class TrainBecameUnavailable(val endpoint: TrainEndpoint) : TrainSelectionEvent
+    data class TrainLost(val endpoint: TrainEndpoint) : TrainSelectionEvent
+    data class TrainAvailable(val endpoint: TrainEndpoint) : TrainSelectionEvent
 }

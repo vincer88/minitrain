@@ -1,5 +1,6 @@
 package com.minitrain.app.repository
 
+import com.minitrain.app.model.TrainConnectionPhase
 import com.minitrain.app.model.TrainConnectionStatus
 import com.minitrain.app.model.TrainDirectory
 import com.minitrain.app.model.TrainDirectoryEntry
@@ -40,10 +41,19 @@ class TrainDirectoryRepository(
         _directory.update { directory ->
             directory.copy(
                 trains = directory.trains.map { entry ->
-                    if (entry.endpoint.id == id) {
-                        entry.copy(status = entry.status.copy(isConnected = true))
-                    } else {
-                        entry.copy(status = entry.status.copy(isConnected = false))
+                    when (entry.endpoint.id) {
+                        id -> entry.copy(
+                            status = entry.status.copy(phase = TrainConnectionPhase.IN_PROGRESS)
+                        )
+                        else -> {
+                            if (entry.status.phase == TrainConnectionPhase.LOST) {
+                                entry
+                            } else {
+                                entry.copy(
+                                    status = entry.status.copy(phase = TrainConnectionPhase.AVAILABLE)
+                                )
+                            }
+                        }
                     }
                 }
             )
@@ -55,11 +65,13 @@ class TrainDirectoryRepository(
             directory.copy(
                 trains = directory.trains.map { entry ->
                     if (entry.endpoint.id == id) {
-                        val status = entry.status.copy(
-                            isAvailable = isAvailable,
-                            isConnected = if (!isAvailable) false else entry.status.isConnected
-                        )
-                        entry.copy(status = status)
+                        val newPhase = when {
+                            isAvailable && entry.status.phase == TrainConnectionPhase.IN_PROGRESS ->
+                                TrainConnectionPhase.IN_PROGRESS
+                            isAvailable -> TrainConnectionPhase.AVAILABLE
+                            else -> TrainConnectionPhase.LOST
+                        }
+                        entry.copy(status = entry.status.copy(phase = newPhase))
                     } else {
                         entry
                     }
@@ -73,7 +85,12 @@ class TrainDirectoryRepository(
             directory.copy(
                 trains = directory.trains.map { entry ->
                     if (entry.endpoint.id == id) {
-                        entry.copy(status = entry.status.copy(isConnected = isConnected))
+                        val newPhase = when {
+                            isConnected -> TrainConnectionPhase.IN_PROGRESS
+                            entry.status.phase == TrainConnectionPhase.LOST -> TrainConnectionPhase.LOST
+                            else -> TrainConnectionPhase.AVAILABLE
+                        }
+                        entry.copy(status = entry.status.copy(phase = newPhase))
                     } else {
                         entry
                     }
