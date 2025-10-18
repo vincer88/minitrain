@@ -1,5 +1,6 @@
 package com.minitrain.app.ui
 
+import com.minitrain.app.model.TrainConnectionPhase
 import com.minitrain.app.model.TrainConnectionStatus
 import com.minitrain.app.model.TrainDirectory
 import com.minitrain.app.model.TrainEndpoint
@@ -99,7 +100,7 @@ class TrainSelectionViewModelTest {
         repository.setAvailability("id-1", false)
         scope.advanceUntilIdle()
 
-        assertTrue(events.any { it is TrainSelectionEvent.TrainBecameUnavailable && it.endpoint == endpoint })
+        assertTrue(events.any { it is TrainSelectionEvent.TrainLost && it.endpoint == endpoint })
         assertNull(viewModel.selectedTrain.value)
         job.cancel()
     }
@@ -115,6 +116,24 @@ class TrainSelectionViewModelTest {
 
         val state = viewModel.uiState.value
         val item = state.trains.first()
-        assertEquals(TrainConnectionStatus(isConnected = false, isAvailable = false), item.status)
+        assertEquals(TrainConnectionStatus(TrainConnectionPhase.LOST), item.status)
+    }
+
+    @Test
+    fun trainRecoveringEmitsAvailableEvent() {
+        val endpoint = TrainEndpoint("id-1", "Train 1", "wss://train-1")
+        repository.addTrain(endpoint)
+        repository.setAvailability("id-1", false)
+
+        scope.advanceUntilIdle()
+
+        val events = mutableListOf<TrainSelectionEvent>()
+        val job = scope.launch { viewModel.events.collect { events.add(it) } }
+
+        repository.setAvailability("id-1", true)
+        scope.advanceUntilIdle()
+
+        assertTrue(events.any { it is TrainSelectionEvent.TrainAvailable && it.endpoint == endpoint })
+        job.cancel()
     }
 }

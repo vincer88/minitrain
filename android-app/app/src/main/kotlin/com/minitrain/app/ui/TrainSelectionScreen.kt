@@ -23,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.minitrain.app.model.TrainConnectionPhase
 import com.minitrain.app.model.TrainEndpoint
 
 @Composable
@@ -30,15 +31,20 @@ fun TrainSelectionRoute(
     viewModel: TrainSelectionViewModel,
     onTrainSelected: (TrainEndpoint) -> Unit,
     onTrainUnavailable: (TrainEndpoint) -> Unit = {},
+    onTrainAvailable: (TrainEndpoint) -> Unit = {},
+    onDismissControl: (TrainEndpoint) -> Unit = {},
+    controlOverlay: @Composable (TrainEndpoint, () -> Unit) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
 ) {
     val state by viewModel.uiState.collectAsState()
+    val selectedTrain by viewModel.selectedTrain.collectAsState()
 
     LaunchedEffect(viewModel) {
         viewModel.events.collect { event ->
             when (event) {
                 is TrainSelectionEvent.ControlScreenRequested -> onTrainSelected(event.endpoint)
-                is TrainSelectionEvent.TrainBecameUnavailable -> onTrainUnavailable(event.endpoint)
+                is TrainSelectionEvent.TrainLost -> onTrainUnavailable(event.endpoint)
+                is TrainSelectionEvent.TrainAvailable -> onTrainAvailable(event.endpoint)
             }
         }
     }
@@ -50,6 +56,10 @@ fun TrainSelectionRoute(
         onSelectTrain = viewModel::selectTrain,
         modifier = modifier
     )
+
+    selectedTrain?.let { endpoint ->
+        controlOverlay(endpoint) { onDismissControl(endpoint) }
+    }
 }
 
 @Composable
@@ -117,16 +127,19 @@ private fun TrainCard(
             Spacer(modifier = Modifier.height(8.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(
-                    text = if (item.status.isAvailable) "Disponible" else "Indisponible",
-                    modifier = Modifier.testTag("availability-${item.endpoint.id}"),
+                    text = statusLabel(item.status.phase),
+                    modifier = Modifier.testTag("status-${item.endpoint.id}"),
                     style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = if (item.status.isAvailable) FontWeight.Medium else FontWeight.Bold
-                )
-                Text(
-                    text = if (item.status.isConnected) "Connecté" else "Déconnecté",
-                    modifier = Modifier.testTag("connection-${item.endpoint.id}"),
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = if (item.status.isConnected) FontWeight.Medium else FontWeight.Normal
+                    fontWeight = when (item.status.phase) {
+                        TrainConnectionPhase.AVAILABLE -> FontWeight.Medium
+                        TrainConnectionPhase.IN_PROGRESS -> FontWeight.SemiBold
+                        TrainConnectionPhase.LOST -> FontWeight.Bold
+                    },
+                    color = when (item.status.phase) {
+                        TrainConnectionPhase.LOST -> MaterialTheme.colorScheme.error
+                        TrainConnectionPhase.IN_PROGRESS -> MaterialTheme.colorScheme.primary
+                        else -> MaterialTheme.colorScheme.onSurface
+                    }
                 )
             }
             Spacer(modifier = Modifier.height(12.dp))
@@ -142,9 +155,20 @@ private fun TrainCard(
                     enabled = item.status.isAvailable,
                     modifier = Modifier.testTag("select-${item.endpoint.id}")
                 ) {
-                    Text(if (isSelected) "En cours" else "Contrôler")
+                    Text(
+                        when (item.status.phase) {
+                            TrainConnectionPhase.IN_PROGRESS -> "En cours"
+                            else -> "Contrôler"
+                        }
+                    )
                 }
             }
         }
     }
+}
+
+private fun statusLabel(phase: TrainConnectionPhase): String = when (phase) {
+    TrainConnectionPhase.AVAILABLE -> "Disponible"
+    TrainConnectionPhase.IN_PROGRESS -> "En cours"
+    TrainConnectionPhase.LOST -> "Perdu"
 }

@@ -88,10 +88,25 @@ data class TrainEndpoint(
 )
 
 @Serializable
+enum class TrainConnectionPhase {
+    AVAILABLE,
+    IN_PROGRESS,
+    LOST
+}
+
+@Serializable
 data class TrainConnectionStatus(
-    val isConnected: Boolean = false,
-    val isAvailable: Boolean = true
-)
+    val phase: TrainConnectionPhase = TrainConnectionPhase.AVAILABLE
+) {
+    val isConnected: Boolean
+        get() = phase == TrainConnectionPhase.IN_PROGRESS
+
+    val isAvailable: Boolean
+        get() = phase == TrainConnectionPhase.AVAILABLE
+
+    val isLost: Boolean
+        get() = phase == TrainConnectionPhase.LOST
+}
 
 @Serializable
 data class TrainDirectoryEntry(
