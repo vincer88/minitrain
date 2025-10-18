@@ -7,9 +7,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
@@ -30,6 +32,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -54,6 +57,7 @@ import com.minitrain.app.model.ActiveCab
 import com.minitrain.app.model.Direction
 import com.minitrain.app.network.VideoStreamState
 import com.minitrain.app.ui.video.TrainVideoStreamView
+import kotlin.math.roundToInt
 
 @Composable
 fun TrainControlScreen(
@@ -307,6 +311,23 @@ private fun TelemetryCard(telemetry: com.minitrain.app.model.Telemetry) {
                 text = "Température : ${"%.1f".format(telemetry.temperatureCelsius)} °C",
                 style = MaterialTheme.typography.bodyMedium
             )
+
+            val progress = telemetry.failSafeProgress.coerceIn(0.0, 1.0)
+            if (telemetry.failSafeActive || progress > 0.0 || telemetry.failSafeElapsedMillis > 0) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Fail-safe : ${progress.times(100).roundToInt()} %",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                LinearProgressIndicator(
+                    progress = progress.toFloat(),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    text = "Temps écoulé : ${telemetry.failSafeElapsedMillis} ms",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
         }
     }
 }

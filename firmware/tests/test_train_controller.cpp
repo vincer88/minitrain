@@ -242,13 +242,14 @@ int runTrainControllerTests() {
         std::cerr << "Pilot release should clear active cab" << std::endl;
         return 1;
     }
-    if (failState.lightsState != LightsState::BothRed || failState.lightsSource != LightsSource::Automatic) {
-        std::cerr << "Pilot release should force bilateral red lights" << std::endl;
+    if (failState.lightsState != LightsState::BothRedFlashing ||
+        failState.lightsSource != LightsSource::Automatic) {
+        std::cerr << "Pilot release should force flashing red lights" << std::endl;
         return 1;
     }
     if (publishedTelemetry.size() != telemetryBeforeRelease + 1 ||
         publishedTelemetry.back().activeCab != ActiveCab::None ||
-        publishedTelemetry.back().lightsState != LightsState::BothRed ||
+        publishedTelemetry.back().lightsState != LightsState::BothRedFlashing ||
         publishedTelemetry.back().lightsSource != LightsSource::Automatic ||
         publishedTelemetry.back().failSafeActive) {
         std::cerr << "Pilot release should publish availability telemetry" << std::endl;

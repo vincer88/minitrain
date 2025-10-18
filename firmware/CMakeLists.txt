@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-set(MINITRAIN_FAILSAFE_THRESHOLD_MS 250 CACHE STRING "Maximum age in milliseconds before fail-safe engages")
+set(MINITRAIN_FAILSAFE_THRESHOLD_MS 150 CACHE STRING "Maximum age in milliseconds before fail-safe engages")
 set(MINITRAIN_FAILSAFE_RAMP_MS 1000 CACHE STRING "Duration in milliseconds of the fail-safe ramp down")
 
 add_library(minitrain_core
