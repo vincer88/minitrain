@@ -33,6 +33,9 @@ fun TrainSelectionRoute(
     onTrainUnavailable: (TrainEndpoint) -> Unit = {},
     onTrainAvailable: (TrainEndpoint) -> Unit = {},
     onShowDetails: (TrainEndpoint) -> Unit = {},
+    onDeleteTrain: (TrainEndpoint) -> Unit = { endpoint ->
+        viewModel.removeTrain(endpoint.id)
+    },
     onDismissControl: (TrainEndpoint) -> Unit = {},
     controlOverlay: @Composable (TrainEndpoint, () -> Unit) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
@@ -47,6 +50,7 @@ fun TrainSelectionRoute(
                 is TrainSelectionEvent.TrainLost -> onTrainUnavailable(event.endpoint)
                 is TrainSelectionEvent.TrainAvailable -> onTrainAvailable(event.endpoint)
                 is TrainSelectionEvent.DetailsRequested -> onShowDetails(event.endpoint)
+                is TrainSelectionEvent.DeleteRequested -> onDeleteTrain(event.endpoint)
             }
         }
     }
@@ -56,6 +60,7 @@ fun TrainSelectionRoute(
         onAddTrain = viewModel::addTrain,
         onSelectTrain = viewModel::selectTrain,
         onShowDetails = viewModel::showDetails,
+        onDeleteTrain = viewModel::requestDelete,
         modifier = modifier
     )
 
@@ -70,6 +75,7 @@ fun TrainSelectionScreen(
     onAddTrain: () -> Unit,
     onSelectTrain: (String) -> Unit,
     onShowDetails: (String) -> Unit,
+    onDeleteTrain: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(modifier = modifier.padding(16.dp)) {
@@ -94,7 +100,8 @@ fun TrainSelectionScreen(
                     TrainRow(
                         item = train,
                         onSelectTrain = onSelectTrain,
-                        onShowDetails = onShowDetails
+                        onShowDetails = onShowDetails,
+                        onDeleteTrain = onDeleteTrain
                     )
                 }
             }
@@ -106,7 +113,8 @@ fun TrainSelectionScreen(
 private fun TrainRow(
     item: TrainItemUiState,
     onSelectTrain: (String) -> Unit,
-    onShowDetails: (String) -> Unit
+    onShowDetails: (String) -> Unit,
+    onDeleteTrain: (String) -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -137,6 +145,13 @@ private fun TrainRow(
             modifier = Modifier.testTag("details-${item.endpoint.id}")
         ) {
             Text("Détails")
+        }
+        Spacer(modifier = Modifier.width(8.dp))
+        TextButton(
+            onClick = { onDeleteTrain(item.endpoint.id) },
+            modifier = Modifier.testTag("delete-${item.endpoint.id}")
+        ) {
+            Text("Supprimer")
         }
         Spacer(modifier = Modifier.width(8.dp))
         TextButton(
