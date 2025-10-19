@@ -112,6 +112,14 @@ class TrainSelectionViewModel(
         }
     }
 
+    fun showDetails(id: String) {
+        val entry = directoryRepository.directory.value.trains.firstOrNull { it.endpoint.id == id }
+            ?: return
+        scope.launch {
+            _events.emit(TrainSelectionEvent.DetailsRequested(entry.endpoint))
+        }
+    }
+
     fun setAvailability(id: String, isAvailable: Boolean) {
         directoryRepository.setAvailability(id, isAvailable)
     }
@@ -152,4 +160,5 @@ sealed interface TrainSelectionEvent {
     data class ControlScreenRequested(val endpoint: TrainEndpoint) : TrainSelectionEvent
     data class TrainLost(val endpoint: TrainEndpoint) : TrainSelectionEvent
     data class TrainAvailable(val endpoint: TrainEndpoint) : TrainSelectionEvent
+    data class DetailsRequested(val endpoint: TrainEndpoint) : TrainSelectionEvent
 }

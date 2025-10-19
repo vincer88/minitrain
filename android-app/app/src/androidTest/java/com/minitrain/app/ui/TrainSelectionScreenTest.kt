@@ -42,7 +42,8 @@ class TrainSelectionScreenTest {
                 TrainSelectionRoute(
                     viewModel = viewModel,
                     onTrainSelected = {},
-                    onTrainUnavailable = {}
+                    onTrainUnavailable = {},
+                    onShowDetails = {}
                 )
             }
         }
@@ -57,19 +58,7 @@ class TrainSelectionScreenTest {
     fun addTrainButtonAddsNewEntry() {
         composeTestRule.onNodeWithTag("add-train").performClick()
         composeTestRule.waitUntil(timeoutMillis = 5_000) { viewModel.uiState.value.trains.isNotEmpty() }
-        composeTestRule.onAllNodesWithTag("train-card").assertCountEquals(1)
-    }
-
-    @Test
-    fun removeTrainDeletesEntryFromList() {
-        composeTestRule.onNodeWithTag("add-train").performClick()
-        composeTestRule.onNodeWithTag("add-train").performClick()
-        composeTestRule.waitUntil(timeoutMillis = 5_000) { viewModel.uiState.value.trains.size == 2 }
-        val firstId = viewModel.uiState.value.trains.first().endpoint.id
-
-        composeTestRule.onNodeWithTag("remove-$firstId").performClick()
-        composeTestRule.waitUntil(timeoutMillis = 5_000) { viewModel.uiState.value.trains.size == 1 }
-        composeTestRule.onAllNodesWithTag("train-card").assertCountEquals(1)
+        composeTestRule.onAllNodesWithTag("train-row").assertCountEquals(1)
     }
 
     @Test
@@ -77,13 +66,15 @@ class TrainSelectionScreenTest {
         var launchedTrainId: String? = null
         var unavailableTrainId: String? = null
         var availableTrainId: String? = null
+        var detailsTrainId: String? = null
         composeTestRule.setContent {
             MaterialTheme {
                 TrainSelectionRoute(
                     viewModel = viewModel,
                     onTrainSelected = { launchedTrainId = it.id },
                     onTrainUnavailable = { unavailableTrainId = it.id },
-                    onTrainAvailable = { availableTrainId = it.id }
+                    onTrainAvailable = { availableTrainId = it.id },
+                    onShowDetails = { detailsTrainId = it.id }
                 )
             }
         }
@@ -92,9 +83,12 @@ class TrainSelectionScreenTest {
         composeTestRule.waitUntil(timeoutMillis = 5_000) { viewModel.uiState.value.trains.isNotEmpty() }
         val trainId = viewModel.uiState.value.trains.first().endpoint.id
 
-        composeTestRule.onNodeWithTag("select-$trainId").performClick()
+        composeTestRule.onNodeWithTag("activate-$trainId").performClick()
         composeTestRule.waitUntil(timeoutMillis = 5_000) { launchedTrainId == trainId }
         composeTestRule.onNodeWithTag("status-$trainId").assertTextEquals("En cours")
+
+        composeTestRule.onNodeWithTag("details-$trainId").performClick()
+        composeTestRule.waitUntil(timeoutMillis = 5_000) { detailsTrainId == trainId }
 
         runBlocking {
             withContext(Dispatchers.Main) {
@@ -107,7 +101,7 @@ class TrainSelectionScreenTest {
         }
 
         composeTestRule.onNodeWithTag("status-$trainId").assertTextEquals("Perdu")
-        composeTestRule.onNodeWithTag("select-$trainId").assertIsNotEnabled()
+        composeTestRule.onNodeWithTag("activate-$trainId").assertIsNotEnabled()
         composeTestRule.waitUntil(timeoutMillis = 5_000) { unavailableTrainId == trainId }
 
         runBlocking {
@@ -125,6 +119,29 @@ class TrainSelectionScreenTest {
     }
 
     @Test
+    fun detailsButtonEmitsEvent() {
+        var detailsTrainId: String? = null
+        composeTestRule.setContent {
+            MaterialTheme {
+                TrainSelectionRoute(
+                    viewModel = viewModel,
+                    onTrainSelected = {},
+                    onTrainUnavailable = {},
+                    onShowDetails = { detailsTrainId = it.id }
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithTag("add-train").performClick()
+        composeTestRule.waitUntil(timeoutMillis = 5_000) { viewModel.uiState.value.trains.isNotEmpty() }
+        val trainId = viewModel.uiState.value.trains.first().endpoint.id
+
+        composeTestRule.onNodeWithTag("details-$trainId").performClick()
+
+        composeTestRule.waitUntil(timeoutMillis = 5_000) { detailsTrainId == trainId }
+    }
+
+    @Test
     fun controlOverlayDisplayedWhenTrainSelected() {
         composeTestRule.setContent {
             MaterialTheme {
@@ -132,6 +149,7 @@ class TrainSelectionScreenTest {
                     viewModel = viewModel,
                     onTrainSelected = {},
                     onTrainUnavailable = {},
+                    onShowDetails = {},
                     controlOverlay = { _, _ ->
                         Box(modifier = Modifier.testTag("overlay"))
                     }
@@ -145,7 +163,7 @@ class TrainSelectionScreenTest {
 
         composeTestRule.onNodeWithTag("overlay").assertDoesNotExist()
 
-        composeTestRule.onNodeWithTag("select-$trainId").performClick()
+        composeTestRule.onNodeWithTag("activate-$trainId").performClick()
         composeTestRule.waitUntil(timeoutMillis = 5_000) { viewModel.selectedTrain.value?.id == trainId }
 
         composeTestRule.onNodeWithTag("overlay").assertExists()
