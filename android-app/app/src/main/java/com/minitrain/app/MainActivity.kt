@@ -103,6 +103,13 @@ class MainActivity : ComponentActivity() {
                                 Toast.LENGTH_SHORT
                             ).show()
                         },
+                        onShowDetails = { endpoint ->
+                            Toast.makeText(
+                                context,
+                                "Détails du train ${endpoint.name}",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        },
                         onDismissControl = { endpoint ->
                             val session = activeSession.value
                             if (session?.endpoint?.id == endpoint.id) {

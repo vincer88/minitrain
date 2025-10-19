@@ -7,11 +7,10 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -20,6 +19,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -32,6 +32,7 @@ fun TrainSelectionRoute(
     onTrainSelected: (TrainEndpoint) -> Unit,
     onTrainUnavailable: (TrainEndpoint) -> Unit = {},
     onTrainAvailable: (TrainEndpoint) -> Unit = {},
+    onShowDetails: (TrainEndpoint) -> Unit = {},
     onDismissControl: (TrainEndpoint) -> Unit = {},
     controlOverlay: @Composable (TrainEndpoint, () -> Unit) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
@@ -45,6 +46,7 @@ fun TrainSelectionRoute(
                 is TrainSelectionEvent.ControlScreenRequested -> onTrainSelected(event.endpoint)
                 is TrainSelectionEvent.TrainLost -> onTrainUnavailable(event.endpoint)
                 is TrainSelectionEvent.TrainAvailable -> onTrainAvailable(event.endpoint)
+                is TrainSelectionEvent.DetailsRequested -> onShowDetails(event.endpoint)
             }
         }
     }
@@ -52,8 +54,8 @@ fun TrainSelectionRoute(
     TrainSelectionScreen(
         state = state,
         onAddTrain = viewModel::addTrain,
-        onRemoveTrain = viewModel::removeTrain,
         onSelectTrain = viewModel::selectTrain,
+        onShowDetails = viewModel::showDetails,
         modifier = modifier
     )
 
@@ -66,8 +68,8 @@ fun TrainSelectionRoute(
 fun TrainSelectionScreen(
     state: TrainSelectionUiState,
     onAddTrain: () -> Unit,
-    onRemoveTrain: (String) -> Unit,
     onSelectTrain: (String) -> Unit,
+    onShowDetails: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(modifier = modifier.padding(16.dp)) {
@@ -87,13 +89,12 @@ fun TrainSelectionScreen(
                 style = MaterialTheme.typography.bodyMedium
             )
         } else {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(state.trains, key = { it.endpoint.id }) { train ->
-                    TrainCard(
+                    TrainRow(
                         item = train,
-                        isSelected = state.selectedTrainId == train.endpoint.id,
-                        onRemoveTrain = onRemoveTrain,
-                        onSelectTrain = onSelectTrain
+                        onSelectTrain = onSelectTrain,
+                        onShowDetails = onShowDetails
                     )
                 }
             }
@@ -102,67 +103,53 @@ fun TrainSelectionScreen(
 }
 
 @Composable
-private fun TrainCard(
+private fun TrainRow(
     item: TrainItemUiState,
-    isSelected: Boolean,
-    onRemoveTrain: (String) -> Unit,
-    onSelectTrain: (String) -> Unit
+    onSelectTrain: (String) -> Unit,
+    onShowDetails: (String) -> Unit
 ) {
-    Card(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .testTag("train-card"),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            .padding(vertical = 4.dp)
+            .testTag("train-row"),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = item.endpoint.name,
-                style = MaterialTheme.typography.titleMedium,
+                style = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.SemiBold
             )
             Text(
-                text = item.endpoint.commandEndpoint,
-                style = MaterialTheme.typography.bodySmall
+                text = statusLabel(item.status.phase),
+                modifier = Modifier.testTag("status-${item.endpoint.id}"),
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = when (item.status.phase) {
+                    TrainConnectionPhase.AVAILABLE -> FontWeight.Medium
+                    TrainConnectionPhase.IN_PROGRESS -> FontWeight.SemiBold
+                    TrainConnectionPhase.LOST -> FontWeight.Bold
+                },
+                color = when (item.status.phase) {
+                    TrainConnectionPhase.LOST -> MaterialTheme.colorScheme.error
+                    TrainConnectionPhase.IN_PROGRESS -> MaterialTheme.colorScheme.primary
+                    else -> MaterialTheme.colorScheme.onSurface
+                }
             )
-            Spacer(modifier = Modifier.height(8.dp))
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(
-                    text = statusLabel(item.status.phase),
-                    modifier = Modifier.testTag("status-${item.endpoint.id}"),
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = when (item.status.phase) {
-                        TrainConnectionPhase.AVAILABLE -> FontWeight.Medium
-                        TrainConnectionPhase.IN_PROGRESS -> FontWeight.SemiBold
-                        TrainConnectionPhase.LOST -> FontWeight.Bold
-                    },
-                    color = when (item.status.phase) {
-                        TrainConnectionPhase.LOST -> MaterialTheme.colorScheme.error
-                        TrainConnectionPhase.IN_PROGRESS -> MaterialTheme.colorScheme.primary
-                        else -> MaterialTheme.colorScheme.onSurface
-                    }
-                )
-            }
-            Spacer(modifier = Modifier.height(12.dp))
-            Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                TextButton(
-                    onClick = { onRemoveTrain(item.endpoint.id) },
-                    modifier = Modifier.testTag("remove-${item.endpoint.id}")
-                ) {
-                    Text("Supprimer")
-                }
-                Button(
-                    onClick = { onSelectTrain(item.endpoint.id) },
-                    enabled = item.status.isAvailable,
-                    modifier = Modifier.testTag("select-${item.endpoint.id}")
-                ) {
-                    Text(
-                        when (item.status.phase) {
-                            TrainConnectionPhase.IN_PROGRESS -> "En cours"
-                            else -> "Contrôler"
-                        }
-                    )
-                }
-            }
+        }
+        TextButton(
+            onClick = { onShowDetails(item.endpoint.id) },
+            modifier = Modifier.testTag("details-${item.endpoint.id}")
+        ) {
+            Text("Détails")
+        }
+        Spacer(modifier = Modifier.width(8.dp))
+        TextButton(
+            onClick = { onSelectTrain(item.endpoint.id) },
+            enabled = item.status.isAvailable,
+            modifier = Modifier.testTag("activate-${item.endpoint.id}")
+        ) {
+            Text("Activer")
         }
     }
 }
