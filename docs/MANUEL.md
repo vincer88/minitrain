@@ -35,17 +35,17 @@ Les réponses télémétriques réutilisent `session_id` et `seq` pour corréler
 
 - **Chiffrement & authentification** : toutes les connexions sont chiffrées (TLS 1.3 minimum). L’authentification mutuelle est réalisée via certificats clients pour la cabine et via OAuth2 mTLS pour les applications mobiles. Les jetons expirent après 12 heures et doivent être renégociés hors bande.
 - **Détection de perte** : deux seuils configurables encadrent désormais la sécurité des trains.
-  - `T₁` (*fail-safe ramp*) : par défaut 150 ms. Dès que l’écart entre le `timestamp` le plus récent et l’horloge locale dépasse `T₁`, la commande moteur est immédiatement coupée. La télémétrie bascule `lights_source` sur `fail_safe` et force l’affichage **rouge bilatéral fixe**. La direction active est conservée uniquement le temps de la fenêtre de sécurité avant neutralisation.
+  - `T₁` (*fail-safe ramp*) : par défaut 150 ms. Dès que l’écart entre le `timestamp` le plus récent et l’horloge locale dépasse `T₁`, la commande moteur est immédiatement coupée tandis que la direction active est maintenue uniquement jusqu’à sa neutralisation.
   - `T₂` (*pilot release*) : par défaut 5 s. Si aucune commande valide n’est reçue pendant `T₂`, le contrôleur considère que le pilote ne maintient plus la session. Le train est alors relâché automatiquement (voir § 2.4) et un nouvel opérateur peut le sélectionner.
-- **Rampe d’arrêt** : la durée de la rampe est configurable (1000 ms par défaut). Elle ne pilote plus une décroissance progressive de la vitesse, mais définit la fenêtre pendant laquelle la direction est maintenue avant de repasser automatiquement à neutre et avant que les feux puissent quitter l’état forcé rouge. Tant que `fail_safe` est actif, la logique d’éclairage reste forcée au rouge.
+- **Rampe d’arrêt** : la durée de la rampe est configurable (1000 ms par défaut). Elle ne pilote plus une décroissance progressive de la vitesse, mais définit la fenêtre pendant laquelle la direction est maintenue avant de repasser automatiquement à neutre.
 
 ### 2.3 Logique d’éclairage et télémétrie
 
 - **Connexion active sans cabine sélectionnée** : feux rouges bilatéraux permanents et état « disponible » publié.
 - **Cabine sélectionnée en marche avant** : feu blanc allumé côté cabine, feu rouge opposé.
 - **Cabine sélectionnée en marche arrière** : inversion des couleurs (blanc vers l’arrière réel de la rame). La télémétrie renvoie l’état courant (`lights_state`) ainsi que la source de décision (`auto`, `override`, `fail_safe`).
-- **Fail-safe ramp (`T₁`)** : dès l’activation, la propulsion est coupée immédiatement et les feux restent **rouges fixes** même si une direction avait été demandée. La télémétrie expose `fail_safe = true` et publie `fail_safe_progress`, qui reflète la temporisation interne jusqu’à la neutralisation de la direction et au relâchement de l’éclairage malgré l’arrêt instantané du moteur.
-- **Pilot release (`T₂`)** : lorsque la libération automatique est déclenchée, les feux passent en **rouge clignotant** jusqu’à ce qu’un opérateur reprenne la main ou qu’un ordre de parcage manuel soit appliqué. La session courante est marquée comme expirée.
+- **Fail-safe ramp (`T₁`)** : dès l’activation, la propulsion est coupée immédiatement. La télémétrie expose `fail_safe = true` et publie `fail_safe_progress`, qui reflète la temporisation interne jusqu’à la neutralisation de la direction.
+- **Pilot release (`T₂`)** : lorsque la libération automatique est déclenchée, les feux conservent l’état déterminé par la logique automatique (sauf override explicite). La session courante est marquée comme expirée.
 - **Overrides** : lorsqu’un bit `lights_override` est actif, le firmware publie l’état forcé et la télémétrie indique `override`. À la désactivation, la logique automatique reprend dès la prochaine commande valide.
 - **Synchronisation** : chaque message de télémétrie inclut `session_id`, `seq`, `timestamp` et reflète la direction/ vitesse réellement appliquées pour permettre la validation client.
 
