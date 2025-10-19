@@ -129,11 +129,6 @@ private fun TrainRow(
                     TrainConnectionPhase.AVAILABLE -> FontWeight.Medium
                     TrainConnectionPhase.IN_PROGRESS -> FontWeight.SemiBold
                     TrainConnectionPhase.LOST -> FontWeight.Bold
-                },
-                color = when (item.status.phase) {
-                    TrainConnectionPhase.LOST -> MaterialTheme.colorScheme.error
-                    TrainConnectionPhase.IN_PROGRESS -> MaterialTheme.colorScheme.primary
-                    else -> MaterialTheme.colorScheme.onSurface
                 }
             )
         }
