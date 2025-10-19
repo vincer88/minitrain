@@ -47,6 +47,10 @@ Les captures d'écran éventuelles sont réalisées manuellement depuis l'émula
 
 La possibilité de sélectionner des habillages cabine dédiés (visuels, flux associés, commandes spécifiques) sera ajoutée dans une prochaine version. En attendant, l'application propose un ensemble commun de contrôles et un habillage générique.
 
+## Documentation
+
+- [Spécification fonctionnelle Android](docs/specs/android.md)
+
 ## Provisionnement des secrets et rotation
 
 La configuration des certificats (CA, client et clé privée) ainsi que des paramètres OAuth2 est documentée dans [`docs/security-provisioning.md`](docs/security-provisioning.md). Les paramètres Gradle et les manifestes décrivent comment injecter ces secrets via vos pipelines de provisionnement.
