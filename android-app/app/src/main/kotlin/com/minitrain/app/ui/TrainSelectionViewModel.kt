@@ -96,10 +96,6 @@ class TrainSelectionViewModel(
         directoryRepository.addTrain(newEndpoint)
     }
 
-    fun removeTrain(id: String) {
-        directoryRepository.removeTrain(id)
-    }
-
     fun selectTrain(id: String) {
         val entry = directoryRepository.directory.value.trains.firstOrNull { it.endpoint.id == id }
             ?: return
@@ -118,6 +114,18 @@ class TrainSelectionViewModel(
         scope.launch {
             _events.emit(TrainSelectionEvent.DetailsRequested(entry.endpoint))
         }
+    }
+
+    fun requestDelete(id: String) {
+        val entry = directoryRepository.directory.value.trains.firstOrNull { it.endpoint.id == id }
+            ?: return
+        scope.launch {
+            _events.emit(TrainSelectionEvent.DeleteRequested(entry.endpoint))
+        }
+    }
+
+    fun removeTrain(id: String) {
+        directoryRepository.removeTrain(id)
     }
 
     fun setAvailability(id: String, isAvailable: Boolean) {
@@ -161,4 +169,5 @@ sealed interface TrainSelectionEvent {
     data class TrainLost(val endpoint: TrainEndpoint) : TrainSelectionEvent
     data class TrainAvailable(val endpoint: TrainEndpoint) : TrainSelectionEvent
     data class DetailsRequested(val endpoint: TrainEndpoint) : TrainSelectionEvent
+    data class DeleteRequested(val endpoint: TrainEndpoint) : TrainSelectionEvent
 }

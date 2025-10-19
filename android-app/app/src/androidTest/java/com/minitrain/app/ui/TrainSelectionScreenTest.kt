@@ -90,6 +90,8 @@ class TrainSelectionScreenTest {
         composeTestRule.onNodeWithTag("details-$trainId").performClick()
         composeTestRule.waitUntil(timeoutMillis = 5_000) { detailsTrainId == trainId }
 
+        composeTestRule.onNodeWithTag("delete-$trainId").assertExists()
+
         runBlocking {
             withContext(Dispatchers.Main) {
                 repository.setAvailability(trainId, false)
@@ -167,5 +169,34 @@ class TrainSelectionScreenTest {
         composeTestRule.waitUntil(timeoutMillis = 5_000) { viewModel.selectedTrain.value?.id == trainId }
 
         composeTestRule.onNodeWithTag("overlay").assertExists()
+    }
+
+    @Test
+    fun deleteButtonEmitsEventAndRemovesTrain() {
+        var deletedTrainId: String? = null
+        composeTestRule.setContent {
+            MaterialTheme {
+                TrainSelectionRoute(
+                    viewModel = viewModel,
+                    onTrainSelected = {},
+                    onTrainUnavailable = {},
+                    onShowDetails = {},
+                    onDeleteTrain = {
+                        deletedTrainId = it.id
+                        viewModel.removeTrain(it.id)
+                    }
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithTag("add-train").performClick()
+        composeTestRule.waitUntil(timeoutMillis = 5_000) { viewModel.uiState.value.trains.isNotEmpty() }
+        val trainId = viewModel.uiState.value.trains.first().endpoint.id
+
+        composeTestRule.onNodeWithTag("delete-$trainId").performClick()
+
+        composeTestRule.waitUntil(timeoutMillis = 5_000) { deletedTrainId == trainId }
+        composeTestRule.waitUntil(timeoutMillis = 5_000) { viewModel.uiState.value.trains.isEmpty() }
+        composeTestRule.onAllNodesWithTag("train-row").assertCountEquals(0)
     }
 }

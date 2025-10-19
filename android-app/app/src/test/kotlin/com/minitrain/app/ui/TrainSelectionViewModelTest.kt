@@ -103,6 +103,21 @@ class TrainSelectionViewModelTest {
     }
 
     @Test
+    fun requestDeleteEmitsDeleteEvent() {
+        val endpoint = TrainEndpoint("id-1", "Train 1", "wss://train-1")
+        repository.addTrain(endpoint)
+
+        val events = mutableListOf<TrainSelectionEvent>()
+        val job = scope.launch { viewModel.events.collect { events.add(it) } }
+
+        viewModel.requestDelete("id-1")
+        scope.advanceUntilIdle()
+
+        assertTrue(events.any { it is TrainSelectionEvent.DeleteRequested && it.endpoint == endpoint })
+        job.cancel()
+    }
+
+    @Test
     fun unavailableTrainEmitsLostControlEvent() {
         val endpoint = TrainEndpoint("id-1", "Train 1", "wss://train-1")
         repository.addTrain(endpoint)
