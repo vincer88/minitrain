@@ -110,6 +110,18 @@ class MainActivity : ComponentActivity() {
                                 Toast.LENGTH_SHORT
                             ).show()
                         },
+                        onDeleteTrain = { endpoint ->
+                            coroutineScope.launch {
+                                val session = activeSession.value
+                                if (session?.endpoint?.id == endpoint.id) {
+                                    if (sheetState.isVisible) {
+                                        sheetState.hide()
+                                    }
+                                    releaseSession(updateRepository = true)
+                                }
+                                selectionViewModel.removeTrain(endpoint.id)
+                            }
+                        },
                         onDismissControl = { endpoint ->
                             val session = activeSession.value
                             if (session?.endpoint?.id == endpoint.id) {
